@@ -1,5 +1,5 @@
 [requires]
-h5pp/1.8.2@davidace/dev
+h5pp/1.8.3@davidace/stable
 
 [generators]
 cmake
