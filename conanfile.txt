@@ -1,0 +1,8 @@
+[requires]
+h5pp/1.8.2@davidace/dev
+
+[generators]
+cmake
+
+[options]
+*:shared=False

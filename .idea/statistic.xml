@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Statistic">
+    <option name="excludeDotArtifactDirectory" value="true" />
+    <option name="excludedDirectories">
+      <list>
+        <option value="$PROJECT_DIR$/cmake-build-debug-clang-10" />
+        <option value="$PROJECT_DIR$/cmake-build-release-clang-10" />
+        <option value="$PROJECT_DIR$/source/general" />
+        <option value="$PROJECT_DIR$/source/io" />
+      </list>
+    </option>
+  </component>
+</project>
