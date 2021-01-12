@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
 
     std::vector<std::string> models = {"hamiltonian"};
     std::vector<std::string> tables = {"measurements", "profiling", "status", "mem_usage"};
-    std::vector<std::string> cronos = {"measurements", "status"};
+    std::vector<std::string> cronos = {};
     //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
     std::vector<DsetKey> dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
                                   {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
