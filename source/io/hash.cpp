@@ -3,18 +3,18 @@
 //
 #include <array>
 #include <fstream>
-#include <iostream>
-#include <openssl/sha.h>
-#include <openssl/md5.h>
-#include <string>
-#include <h5pp/details/h5ppFilesystem.h>
 #include <functional>
+#include <h5pp/details/h5ppFilesystem.h>
+#include <iostream>
+#include <openssl/md5.h>
+#include <openssl/sha.h>
+#include <string>
 namespace tools::hash {
     std::string sha256_file(const std::string &fn) {
         std::ifstream file(fn, std::ios::binary);
         if(file.is_open()) {
             std::array<char, 524288> buf = {};
-            SHA256_CTX             sha256;
+            SHA256_CTX               sha256;
             SHA256_Init(&sha256);
             while(not file.eof()) {
                 file.read(buf.data(), buf.size());
@@ -38,7 +38,7 @@ namespace tools::hash {
         std::ifstream file(fn, std::ios::binary);
         if(file.is_open()) {
             std::array<char, 524288> buf = {};
-            MD5_CTX md5;
+            MD5_CTX                  md5;
             MD5_Init(&md5);
             while(not file.eof()) {
                 file.read(buf.data(), buf.size());
@@ -70,16 +70,14 @@ namespace tools::hash {
         return std::string(out.begin(), out.end());
     }
 
-
-    std::string md5_file_meta(const h5pp::fs::path & fpath, const std::string & more_meta){
+    std::string md5_file_meta(const h5pp::fs::path &fpath, const std::string &more_meta) {
         std::string meta;
         meta.reserve(512);
         meta += fpath.string() + '\n';
         meta += std::to_string(h5pp::fs::last_write_time(fpath).time_since_epoch().count()) + '\n';
-        if(not more_meta.empty())
-            meta += more_meta + '\n';
+        if(not more_meta.empty()) meta += more_meta + '\n';
         return std::to_string(std::hash<std::string>{}(meta));
-//        return md5_string(meta);
+        //        return md5_string(meta);
     }
 
 }

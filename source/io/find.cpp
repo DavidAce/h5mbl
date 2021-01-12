@@ -3,16 +3,16 @@
 #include <regex>
 namespace tools::io {
     template<bool RECURSIVE>
-    std::vector<h5pp::fs::path> find_file(const h5pp::fs::path &base, const std::string & pattern) {
+    std::vector<h5pp::fs::path> find_file(const h5pp::fs::path &base, const std::string &pattern) {
         std::vector<h5pp::fs::path> result;
-        std::regex reg(pattern);
+        std::regex                  reg(pattern);
         using dir_iterator = typename std::conditional<RECURSIVE, h5pp::fs::recursive_directory_iterator, h5pp::fs::directory_iterator>::type;
         for(auto &obj : dir_iterator(base))
             if(h5pp::fs::is_regular_file(obj) and std::regex_match(obj.path().filename().string(), reg)) result.emplace_back(obj);
         return result;
     }
-    template std::vector<h5pp::fs::path> find_file<true>(const h5pp::fs::path &base,  const std::string & pattern);
-    template std::vector<h5pp::fs::path> find_file<false>(const h5pp::fs::path &base,  const std::string & pattern);
+    template std::vector<h5pp::fs::path> find_file<true>(const h5pp::fs::path &base, const std::string &pattern);
+    template std::vector<h5pp::fs::path> find_file<false>(const h5pp::fs::path &base, const std::string &pattern);
 
     template<bool RECURSIVE>
     std::vector<h5pp::fs::path> find_dir(const h5pp::fs::path &base, const std::string &pattern, const std::string &subdir) {

@@ -31,7 +31,8 @@ namespace tools::h5db {
             // Find table databases
             for(auto &meta : metas) {
                 std::vector<std::string> dbNames;
-                if constexpr(std::is_same_v<MetaType, std::string>) dbNames = h5_tgt.findDatasets(meta, dbGroup, -1, 0);
+                if constexpr(std::is_same_v<MetaType, std::string>)
+                    dbNames = h5_tgt.findDatasets(meta, dbGroup, -1, 0);
                 else if constexpr(std::is_same_v<MetaType, DsetKey>)
                     dbNames = h5_tgt.findDatasets(meta.name, dbGroup, -1, 0);
                 if(dbNames.empty()) continue;
@@ -44,7 +45,8 @@ namespace tools::h5db {
                 auto seedIdDb = h5_tgt.readTableRecords<std::vector<SeedId>>(dbPath);
                 auto infoKey  = h5_tgt.readAttribute<std::string>("key", dbPath);
                 auto infoPath = h5_tgt.readAttribute<std::string>("path", dbPath);
-                if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>) infoDataBase[infoKey] = h5_tgt.getDatasetInfo(infoPath);
+                if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>)
+                    infoDataBase[infoKey] = h5_tgt.getDatasetInfo(infoPath);
                 else if constexpr(std::is_same_v<InfoType, h5pp::TableInfo>)
                     infoDataBase[infoKey] = h5_tgt.getTableInfo(infoPath);
                 auto &infoId = infoDataBase[infoKey];
@@ -68,7 +70,9 @@ namespace tools::h5db {
         }
         std::vector<FileId> fileIdVec;
         for(auto &fileId : fileIdDb) { fileIdVec.emplace_back(fileId.second); }
-        auto sorter = [](auto &lhs, auto &rhs) { return lhs.seed < rhs.seed; };
+        auto sorter = [](auto &lhs, auto &rhs) {
+            return lhs.seed < rhs.seed;
+        };
         std::sort(fileIdVec.begin(), fileIdVec.end(), sorter);
         h5_tgt.writeTableRecords(fileIdVec, ".db/files");
         tools::prof::t_dat.toc();
@@ -113,10 +117,13 @@ namespace tools::h5db {
         for(auto &[infoKey, infoId] : infoDb) {
             std::vector<SeedId> seedIdxVec;
             for(auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
-            auto sorter = [](auto &lhs, auto &rhs) { return lhs.seed < rhs.seed; };
+            auto sorter = [](auto &lhs, auto &rhs) {
+                return lhs.seed < rhs.seed;
+            };
             std::sort(seedIdxVec.begin(), seedIdxVec.end(), sorter);
             h5pp::fs::path tgtPath;
-            if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>) tgtPath = infoId.info.dsetPath.value();
+            if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>)
+                tgtPath = infoId.info.dsetPath.value();
             else if constexpr(std::is_same_v<InfoType, h5pp::TableInfo>)
                 tgtPath = infoId.info.tablePath.value();
 
@@ -172,7 +179,8 @@ namespace tools::h5db {
         bool seedMatch = oldFileId.seed == newFileId.seed;
         bool hashMatch = std::string_view(oldFileId.hash, 32) == std::string_view(newFileId.hash, 32);
 
-        if(seedMatch and hashMatch) return FileIdStatus::UPTODATE;
+        if(seedMatch and hashMatch)
+            return FileIdStatus::UPTODATE;
         else if(seedMatch and not hashMatch)
             return FileIdStatus::STALE;
         else if(not seedMatch and hashMatch)

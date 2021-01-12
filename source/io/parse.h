@@ -27,14 +27,12 @@ namespace tools::parse {
 
     template<typename T>
     [[nodiscard]] T extract_digits_from_h5_filename(const std::string &input) {
-        std::string stem = input.substr(0,input.find(".h5"));
+        std::string stem = input.substr(0, input.find(".h5"));
         std::string seed_str;
         for(const auto &c : stem)
             if(std::isdigit(c)) seed_str.push_back(c);
         try {
-            return parse_param<T>(seed_str,input);
-        } catch(const std::exception &err) {
-            throw std::runtime_error(h5pp::format("Could not convert {} to a number: {}", input, err.what()));
-        }
+            return parse_param<T>(seed_str, input);
+        } catch(const std::exception &err) { throw std::runtime_error(h5pp::format("Could not convert {} to a number: {}", input, err.what())); }
     }
 }

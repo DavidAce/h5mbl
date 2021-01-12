@@ -58,8 +58,8 @@ int main(int argc, char *argv[]) {
     tools::prof::init();
     h5pp::fs::path              default_base = h5pp::fs::canonical("/mnt/Barracuda/Projects/mbl_transition");
     std::vector<h5pp::fs::path> src_dirs;
-    std::string                 src_out        = "output";
-    std::string                 tgt_file       = "merged.h5";
+    std::string                 src_out  = "output";
+    std::string                 tgt_file = "merged.h5";
     h5pp::fs::path              tgt_dir;
     size_t                      verbosity      = 2;
     size_t                      verbosity_h5pp = 2;
@@ -69,7 +69,8 @@ int main(int argc, char *argv[]) {
     while(true) {
         char opt = static_cast<char>(getopt(argc, argv, "hb:f:m:o:s:t:v:V:"));
         if(opt == EOF) break;
-        if(optarg == nullptr) tools::logger::log->info("Parsing input argument: -{}", opt);
+        if(optarg == nullptr)
+            tools::logger::log->info("Parsing input argument: -{}", opt);
         else
             tools::logger::log->info("Parsing input argument: -{} {}", opt, optarg);
         switch(opt) {
@@ -80,7 +81,7 @@ int main(int argc, char *argv[]) {
             case 's': {
                 h5pp::fs::path src_dir = optarg;
                 if(src_dir.is_relative()) {
-                    auto matching_dirs = tools::io::find_dir<false>(default_base, src_dir.string(),src_out);
+                    auto matching_dirs = tools::io::find_dir<false>(default_base, src_dir.string(), src_out);
                     if(matching_dirs.size() > 5) {
                         std::string error_msg = h5pp::format("Too many directories match the pattern {}:\n", (default_base / src_dir).string());
                         for(auto &dir : matching_dirs) error_msg.append(dir.string() + "\n");
@@ -115,16 +116,18 @@ int main(int argc, char *argv[]) {
     h5pp::fs::path tgt_path = tgt_dir / tgt_file;
     tools::logger::log->info("Merge into target file {}", tgt_path.string());
 
-    std::vector<std::string> algo_keys = {"LBIT"};
+    std::vector<std::string> algo_keys  = {"LBIT"};
     std::vector<std::string> state_keys = {"state_*"};
     std::vector<std::string> point_keys = {"finished", "checkpoint/iter_*"};
 
-    std::vector<std::string> models    = {"hamiltonian"};
-    std::vector<std::string> tables    = {"measurements", "profiling", "status", "mem_usage"};
-    std::vector<std::string> cronos    = {"measurements", "status"};
+    std::vector<std::string> models = {"hamiltonian"};
+    std::vector<std::string> tables = {"measurements", "profiling", "status", "mem_usage"};
+    std::vector<std::string> cronos = {"measurements", "status"};
     //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
-    std::vector<DsetKey> dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},     {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
-                                   {Type::DOUBLE, Size::FIX, "truncation_errors", ""}, {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
+    std::vector<DsetKey> dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
+                                  {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
+                                  {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
+                                  {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
 
     DsetKey bonds{Type::COMPLEX, Size::VAR, "L_", ""};
 
@@ -165,39 +168,39 @@ int main(int argc, char *argv[]) {
             tools::prof::t_itr.toc();
             continue;
         }
-        if(not src_out.empty() and src_abs.string().find(src_out) == std::string::npos){
+        if(not src_out.empty() and src_abs.string().find(src_out) == std::string::npos) {
             tools::prof::t_itr.toc();
             continue;
         }
 
-//        if(src_abs.string().find("L_20") != std::string::npos) {
-//            tools::prof::t_itr.toc();
-//            continue;
-//        }
-//        if(src_abs.string().find("l_0.0000") != std::string::npos) {
-//            tools::prof::t_itr.toc();
-//            continue;
-//        }
-//        if(src_abs.string().find("l_0.0050") != std::string::npos) {
-//            tools::prof::t_itr.toc();
-//            continue;
-//        }
-//        if(src_abs.string().find("l_0.0100") != std::string::npos) {
-//            tools::prof::t_itr.toc();
-//            continue;
-//        }
-//        if(src_abs.string().find("l_0.0150") != std::string::npos) {
-//            tools::prof::t_itr.toc();
-//            continue;
-//        }
-//        if(src_abs.string().find("d_0.0488") != std::string::npos) {
-//            tools::prof::t_itr.toc();
-//            continue;
-//        }
-//        if(src_abs.string().find("d_+0.0500") != std::string::npos) {
-//            tools::prof::t_itr.toc();
-//            continue;
-//        }
+        //        if(src_abs.string().find("L_20") != std::string::npos) {
+        //            tools::prof::t_itr.toc();
+        //            continue;
+        //        }
+        //        if(src_abs.string().find("l_0.0000") != std::string::npos) {
+        //            tools::prof::t_itr.toc();
+        //            continue;
+        //        }
+        //        if(src_abs.string().find("l_0.0050") != std::string::npos) {
+        //            tools::prof::t_itr.toc();
+        //            continue;
+        //        }
+        //        if(src_abs.string().find("l_0.0100") != std::string::npos) {
+        //            tools::prof::t_itr.toc();
+        //            continue;
+        //        }
+        //        if(src_abs.string().find("l_0.0150") != std::string::npos) {
+        //            tools::prof::t_itr.toc();
+        //            continue;
+        //        }
+        //        if(src_abs.string().find("d_0.0488") != std::string::npos) {
+        //            tools::prof::t_itr.toc();
+        //            continue;
+        //        }
+        //        if(src_abs.string().find("d_+0.0500") != std::string::npos) {
+        //            tools::prof::t_itr.toc();
+        //            continue;
+        //        }
 
         tools::prof::t_itr.toc();
         tools::prof::t_pre.tic();
@@ -230,19 +233,18 @@ int main(int argc, char *argv[]) {
         }
         file_counter[src_base]++;
 
-
         // Append latest profiling information to table
         tools::prof::append();
 
         // We should now have enough to define a FileId
         tools::prof::t_hsh.tic();
-        auto   src_hash = tools::hash::md5_file_meta(src_abs);
-        auto   src_seed = tools::parse::extract_digits_from_h5_filename<long>(src_rel.filename());
-//        if(src_seed < 140000){
-//            if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
-//            if(tools::prof::t_hsh.is_measuring) tools::prof::t_hsh.toc();
-//            continue;
-//        }
+        auto src_hash = tools::hash::md5_file_meta(src_abs);
+        auto src_seed = tools::parse::extract_digits_from_h5_filename<long>(src_rel.filename());
+        //        if(src_seed < 140000){
+        //            if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
+        //            if(tools::prof::t_hsh.is_measuring) tools::prof::t_hsh.toc();
+        //            continue;
+        //        }
         FileId fileId(src_seed, src_abs.string(), src_hash);
 
         // We check if it's in the file database
@@ -250,7 +252,7 @@ int main(int argc, char *argv[]) {
         tools::logger::log->info("Found path: {} | {} | {}", src_rel.string(), enum2str(status), src_hash);
         tgtFileDb[fileId.path] = fileId;
         tools::prof::t_hsh.toc();
-        if(status == FileIdStatus::UPTODATE){
+        if(status == FileIdStatus::UPTODATE) {
             if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
             continue;
         }
@@ -263,8 +265,9 @@ int main(int argc, char *argv[]) {
         h5pp::File h5_src;
         try {
             h5_src = h5pp::File(src_abs.string(), h5pp::FilePermission::READONLY, verbosity_h5pp);
-//            h5_src.setDriver_core(false, 10 * 1024 * 1024);
-            h5_src.setDriver_sec2();
+            //            h5_src.setDriver_core(false, 10 * 1024 * 1024);
+//            h5_src.setDriver_sec2();
+            h5_src.setDriver_core();
             h5_src.setKeepFileOpened();
             if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
         } catch(const std::exception &ex) {
@@ -273,20 +276,16 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-
-
-
-
         // Define reusable source Info
         static std::unordered_map<std::string, h5pp::TableInfo> srcTableDb;
         static std::unordered_map<std::string, h5pp::DsetInfo>  srcDsetDb;
-        static std::unordered_map<std::string, ModelId<lbit>>  srcModelDb;
+        static std::unordered_map<std::string, ModelId<lbit>>   srcModelDb;
 
         // Start finding the required components in the source
-//        std::vector<std::string> groups;
+        //        std::vector<std::string> groups;
         tools::prof::t_gr1.tic();
-        auto groups = tools::h5io::findKeys(h5_src,"/",algo_keys,-1,0);
-//        groups = h5_src.findLinks(algo_key, "/", -1, 0);
+        auto groups = tools::h5io::findKeys(h5_src, "/", algo_keys, -1, 0);
+        //        groups = h5_src.findLinks(algo_key, "/", -1, 0);
         tools::prof::t_gr1.toc();
 
         for(const auto &algo : groups) {
@@ -301,34 +300,28 @@ int main(int argc, char *argv[]) {
             // and transfer them to the target file
 
             tools::prof::t_gr2.tic();
-            auto state_groups = tools::h5io::findKeys(h5_src,algo,state_keys,-1,0);
+            auto state_groups = tools::h5io::findKeys(h5_src, algo, state_keys, -1, 0);
             tools::prof::t_gr2.toc();
             for(const auto &state : state_groups) {
                 tools::prof::t_gr3.tic();
-                auto point_groups = tools::h5io::findKeys(h5_src,fmt::format("{}/{}", algo, state),point_keys,-1,1);
+                auto point_groups = tools::h5io::findKeys(h5_src, fmt::format("{}/{}", algo, state), point_keys, -1, 1);
                 tools::prof::t_gr3.toc();
                 for(const auto &point : point_groups) {
                     auto srcGroupPath = fmt::format("{}/{}/{}", algo, state, point);
                     auto tgtGroupPath = fmt::format("{}/{}/{}/{}", tgt_base, algo, state, point);
                     // Try gathering all the tables
                     try {
-                        auto dsetKeys  = tools::h5io::gatherDsetKeys(h5_src, srcDsetDb, srcGroupPath, dsets);
+                        auto dsetKeys = tools::h5io::gatherDsetKeys(h5_src, srcDsetDb, srcGroupPath, dsets);
                         tools::h5io::transferDatasets(h5_tgt, tgtDsetDb, h5_src, srcDsetDb, tgtGroupPath, dsetKeys, fileId);
-                    } catch(const std::exception &ex) {
-                        tools::logger::log->warn("Dset transfer failed in [{}]: {}", srcGroupPath, ex.what());
-                    }
+                    } catch(const std::exception &ex) { tools::logger::log->warn("Dset transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
                     try {
                         auto tableKeys = tools::h5io::gatherTableKeys(h5_src, srcTableDb, srcGroupPath, tables);
                         tools::h5io::transferTables(h5_tgt, tgtTableDb, srcTableDb, tgtGroupPath, tableKeys, fileId);
-                    } catch(const std::exception &ex) {
-                        tools::logger::log->warn("Table transfer failed in [{}]: {}", srcGroupPath, ex.what());
-                    }
+                    } catch(const std::exception &ex) { tools::logger::log->warn("Table transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
                     try {
                         auto cronoKeys = tools::h5io::gatherTableKeys(h5_src, srcTableDb, srcGroupPath, cronos);
                         tools::h5io::transferCronos(h5_tgt, tgtTableDb, srcTableDb, tgtGroupPath, cronoKeys, fileId);
-                    } catch(const std::exception &ex) {
-                        tools::logger::log->warn("Crono transfer failed in[{}]: {}", srcGroupPath, ex.what());
-                    }
+                    } catch(const std::exception &ex) { tools::logger::log->warn("Crono transfer failed in[{}]: {}", srcGroupPath, ex.what()); }
                 }
             }
         }

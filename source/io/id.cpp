@@ -7,12 +7,14 @@ FileId::FileId(long seed_, std::string_view path_, std::string_view hash_) : see
 }
 std::string FileId::string() const { return h5pp::format("path [{}] | seed {} | hash {}", path, seed, hash); }
 
-
-template<typename InfoType> InfoId<InfoType>::InfoId(long seed_, long index_){ db[seed_] = index_;}
-template<typename InfoType> InfoId<InfoType>::InfoId(const InfoType & info_) : info(info_){}
+template<typename InfoType>
+InfoId<InfoType>::InfoId(long seed_, long index_) {
+    db[seed_] = index_;
+}
+template<typename InfoType>
+InfoId<InfoType>::InfoId(const InfoType &info_) : info(info_) {}
 template struct InfoId<h5pp::DsetInfo>;
 template struct InfoId<h5pp::TableInfo>;
-
 
 H5T_FileId::H5T_FileId() { register_table_type(); }
 void H5T_FileId::register_table_type() {
@@ -28,7 +30,6 @@ void H5T_FileId::register_table_type() {
     H5Tinsert(h5_type, "path", HOFFSET(FileId, path), H5T_PATH);
     H5Tinsert(h5_type, "hash", HOFFSET(FileId, hash), H5T_HASH);
 }
-
 
 H5T_SeedId::H5T_SeedId() { register_table_type(); }
 void H5T_SeedId::register_table_type() {
