@@ -23,6 +23,7 @@ add_executable(${PROJECT_NAME}
         source/io/h5io.cpp
         source/io/id.cpp
         source/general/prof.cpp
+        source/general/text.cpp
         source/general/class_tic_toc.cpp
         )
 target_include_directories(${PROJECT_NAME} PRIVATE source)

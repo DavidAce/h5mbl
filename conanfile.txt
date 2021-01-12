@@ -1,5 +1,5 @@
 [requires]
-h5pp/1.8.4@davidace/dev
+h5pp/1.8.5@davidace/dev
 openssl/1.1.1h@
 
 [generators]

@@ -14,21 +14,45 @@ struct FileId {
     [[nodiscard]] std::string string() const;
 };
 
+struct lbit{
+    double      J1_mean, J2_mean, J3_mean;
+    double      J1_wdth, J2_wdth, J3_wdth;
+};
 
-struct ModelId {
-    size_t      model_size;
+struct sdual{
     double      J_mean;
     double      J_stdv;
     double      h_mean;
     double      h_stdv;
     double      lambda;
     double      delta;
+};
+
+template<typename Param>
+struct ModelId {
+    Param p;
+    size_t      model_size;
     std::string model_type;
     std::string distribution;
     std::string algorithm;
     std::string key;
     std::string path;
 };
+
+//struct ModelId {
+//    size_t      model_size;
+//    double      J_mean;
+//    double      J_stdv;
+//    double      h_mean;
+//    double      h_stdv;
+//    double      lambda;
+//    double      delta;
+//    std::string model_type;
+//    std::string distribution;
+//    std::string algorithm;
+//    std::string key;
+//    std::string path;
+//};
 
 template<typename InfoType>
 struct InfoId {

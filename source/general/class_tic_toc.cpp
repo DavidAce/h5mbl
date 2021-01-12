@@ -6,10 +6,11 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <utility>
 
 class_tic_toc::class_tic_toc() : class_tic_toc(true, 5, "") {}
 
-class_tic_toc::class_tic_toc(bool on_off, int prec, std::string output_text) : name(output_text), enable(on_off), print_precision(prec) {
+class_tic_toc::class_tic_toc(bool on_off, int prec, std::string output_text) : name(std::move(output_text)), enable(on_off), print_precision(prec) {
     if(enable) {
         if(!name.empty()) { name += ": "; }
         reset();
@@ -18,7 +19,7 @@ class_tic_toc::class_tic_toc(bool on_off, int prec, std::string output_text) : n
 
 void class_tic_toc::tic() {
     if(enable) {
-        if(is_measuring) throw std::runtime_error("Called tic() twice: this timer is already measuring");
+        if(is_measuring) throw std::runtime_error("Called tic() twice on timer [" + name +"]: this timer is already measuring");
         tic_timepoint = std::chrono::high_resolution_clock::now();
         is_measuring  = true;
     }
@@ -26,7 +27,7 @@ void class_tic_toc::tic() {
 
 void class_tic_toc::toc() {
     if(enable) {
-        if(not is_measuring) throw std::runtime_error("Called toc() twice or without prior tic()");
+        if(not is_measuring) throw std::runtime_error("Called toc() twice or without prior tic() on timer [" + name +"]");
         toc_timepoint = std::chrono::high_resolution_clock::now();
         delta_time    = toc_timepoint - tic_timepoint;
         measured_time += delta_time;
@@ -35,9 +36,9 @@ void class_tic_toc::toc() {
     }
 }
 
-void class_tic_toc::set_properties(bool on_off, int prec, std::string output_text) { *this = class_tic_toc(on_off, prec, output_text); }
+void class_tic_toc::set_properties(bool on_off, int prec, std::string output_text) { *this = class_tic_toc(on_off, prec, std::move(output_text)); }
 
-void class_tic_toc::set_label(std::string output_text) { *this = class_tic_toc(enable, print_precision, output_text); }
+void class_tic_toc::set_label(std::string output_text) { *this = class_tic_toc(enable, print_precision, std::move(output_text)); }
 
 void class_tic_toc::set_measured_time(double other_time_in_seconds) {
     measured_time = std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));

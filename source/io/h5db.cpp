@@ -32,7 +32,7 @@ namespace tools::h5db {
             for(auto &meta : metas) {
                 std::vector<std::string> dbNames;
                 if constexpr(std::is_same_v<MetaType, std::string>) dbNames = h5_tgt.findDatasets(meta, dbGroup, -1, 0);
-                else if constexpr(std::is_same_v<MetaType, DsetMeta>)
+                else if constexpr(std::is_same_v<MetaType, DsetKey>)
                     dbNames = h5_tgt.findDatasets(meta.name, dbGroup, -1, 0);
                 if(dbNames.empty()) continue;
                 if(dbNames.size() > 1) throw std::logic_error(h5pp::format("Found multiple seed databases: {}", dbNames));
@@ -57,7 +57,7 @@ namespace tools::h5db {
     }
 
     template std::unordered_map<std::string, InfoId<h5pp::TableInfo>> loadDatabase(const h5pp::File &h5_tgt, const std::vector<std::string> &metas);
-    template std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<DsetMeta> &metas);
+    template std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<DsetKey> &metas);
 
     void saveDatabase(h5pp::File &h5_tgt, const std::unordered_map<std::string, FileId> &fileIdDb) {
         tools::prof::t_dat.tic();
@@ -74,9 +74,42 @@ namespace tools::h5db {
         tools::prof::t_dat.toc();
     }
 
+    void clearInfo(std::optional<h5pp::DataInfo> &info) {
+        if(info) {
+            info->dataSize = std::nullopt;
+            info->dataByte = std::nullopt;
+            info->dataDims = std::nullopt;
+            info->h5Space  = std::nullopt;
+        }
+    }
+    void clearInfo(std::optional<h5pp::TableInfo> &info) {
+        if(info) {
+            info->h5Dset         = std::nullopt;
+            info->numRecords     = std::nullopt;
+            info->tableGroupName = std::nullopt;
+            info->tablePath      = std::nullopt;
+            info->tableExists    = std::nullopt;
+        }
+    }
+    void clearInfo(std::optional<h5pp::AttrInfo> &info) {
+        if(info) {
+            info->h5Attr   = std::nullopt;
+            info->h5Space  = std::nullopt;
+            info->linkPath = std::nullopt;
+            info->attrSize = std::nullopt;
+            info->attrByte = std::nullopt;
+            info->attrDims = std::nullopt;
+        }
+    }
+
     template<typename InfoType>
     void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<InfoType>> &infoDb) {
         tools::prof::t_dat.tic();
+        std::optional<h5pp::DataInfo>  dataInfoKey;
+        std::optional<h5pp::DataInfo>  dataInfoPath;
+        std::optional<h5pp::AttrInfo>  attrInfoKey;
+        std::optional<h5pp::AttrInfo>  attrInfoPath;
+        std::optional<h5pp::TableInfo> tableInfo;
         for(auto &[infoKey, infoId] : infoDb) {
             std::vector<SeedId> seedIdxVec;
             for(auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
@@ -93,9 +126,28 @@ namespace tools::h5db {
             tools::logger::log->info("Writing database: {}", tgtDbPath);
             if(not h5_tgt.linkExists(tgtDbPath)) {
                 H5T_SeedId::register_table_type();
-                h5_tgt.createTable(H5T_SeedId::h5_type, tgtDbPath, "Seed index database", {1000}, 4);
-                h5_tgt.writeAttribute(infoKey, "key", tgtDbPath);
-                h5_tgt.writeAttribute(tgtPath.string(), "path", tgtDbPath);
+                if(tableInfo) {
+                    clearInfo(tableInfo);
+                    tableInfo->tablePath = tgtDbPath;
+                    h5_tgt.createTable(tableInfo.value());
+                } else {
+                    tableInfo = h5_tgt.createTable(H5T_SeedId::h5_type, tgtDbPath, "Seed index database", {1000}, 4);
+                }
+
+                if(attrInfoKey and dataInfoKey and attrInfoPath and dataInfoPath) {
+                    // Renew some of the metdata
+                    clearInfo(attrInfoKey);
+                    clearInfo(attrInfoPath);
+                    clearInfo(dataInfoKey);
+                    clearInfo(dataInfoPath);
+                    attrInfoKey->linkPath  = tgtDbPath;
+                    attrInfoPath->linkPath = tgtDbPath;
+                    h5_tgt.writeAttribute(infoKey, dataInfoKey.value(), attrInfoKey.value());
+                    h5_tgt.writeAttribute(tgtPath.string(), dataInfoPath.value(), attrInfoPath.value());
+                } else {
+                    attrInfoKey  = h5_tgt.writeAttribute(infoKey, "key", tgtDbPath);
+                    attrInfoPath = h5_tgt.writeAttribute(tgtPath.string(), "path", tgtDbPath);
+                }
             }
             if(seedIdxVec.empty()) continue;
             h5_tgt.writeTableRecords(seedIdxVec, tgtDbPath);
