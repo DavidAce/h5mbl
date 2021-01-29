@@ -35,4 +35,16 @@ namespace tools::parse {
             return parse_param<T>(seed_str, input);
         } catch(const std::exception &err) { throw std::runtime_error(h5pp::format("Could not convert {} to a number: {}", input, err.what())); }
     }
+
+    template<typename T>
+    [[nodiscard]] T extract_paramter_from_path(const std::string & input, const std::string & param_name){
+        std::string param_str = input.substr(input.find(param_name) + param_name.size(), input.find('/')-1);
+        try {
+            return parse_param<T>(param_str, input);
+        } catch(const std::exception &err) {
+            throw std::runtime_error(h5pp::format("Could not convert {} to a number: {}", input, err.what()));
+        }
+    }
+
+
 }

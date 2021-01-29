@@ -6,6 +6,7 @@
 #include <io/id.h>
 #include <io/logger.h>
 #include <io/meta.h>
+#include <io/parse.h>
 #include <regex>
 #include <set>
 #include <string>
@@ -65,9 +66,12 @@ namespace tools::h5io {
     std::string get_standardized_base(const ModelId<T> &H, int decimals) {
         if constexpr(std::is_same_v<T, sdual>) return h5pp::format("L_{1}/l_{2:.{0}f}/d_{3:+.{0}f}", decimals, H.model_size, H.p.lambda, H.p.delta);
         if constexpr(std::is_same_v<T, lbit>) {
+            decimals = 2;
             std::string J_mean_str = fmt::format("J[{1:+.{0}f}_{2:+.{0}f}_{3:+.{0}f}]", decimals, H.p.J1_mean, H.p.J2_mean, H.p.J3_mean);
             std::string J_wdth_str = fmt::format("w[{1:+.{0}f}_{2:+.{0}f}_{3:+.{0}f}]", decimals, H.p.J1_wdth, H.p.J2_wdth, H.p.J3_wdth);
-            return h5pp::format("L_{}/{}/{}", H.model_size, J_mean_str, J_wdth_str);
+            std::string f_str = fmt::format("f_{1:.{0}f}",decimals, H.p.f_mixer);
+            std::string u_str = fmt::format("u_{}", H.p.u_layer );
+            return h5pp::format("L_{}/{}/{}/{}/{}", H.model_size, J_mean_str, J_wdth_str, f_str, u_str);
         }
     }
     template std::string get_standardized_base(const ModelId<sdual> &H, int decimals);
@@ -150,6 +154,14 @@ namespace tools::h5io {
                 H.p.J1_wdth = h5_src.readAttribute<double>("J1_wdth", modelPath);
                 H.p.J2_wdth = h5_src.readAttribute<double>("J2_wdth", modelPath);
                 H.p.J3_wdth = h5_src.readAttribute<double>("J3_wdth", modelPath);
+                try{
+                    H.p.f_mixer = h5_src.readAttribute<double>("f_mixer", modelPath);
+                    H.p.u_layer = h5_src.readAttribute<size_t>("u_layer", modelPath);
+                }catch (const std::exception & ex){
+                    H.p.f_mixer = tools::parse::extract_paramter_from_path<double>(h5_src.getFilePath(), "f+");
+                    H.p.u_layer = 6;
+                    tools::logger::log->debug("Could not find model parameter: {} | Replaced with f=[{:.2f}] u=[{}]", ex.what(), H.p.f_mixer, H.p.u_layer);
+                }
             }
         }
         tools::prof::t_ham.toc();
@@ -168,7 +180,7 @@ namespace tools::h5io {
         bool              tgtExists    = tgtModelDb.find(tgtModelPath) != tgtModelDb.end();
         if(not tgtExists) {
             // Copy the whole Hamiltonian table (with site information)
-            h5_tgt.copyLinkFromLocation(tgtModelPath, h5_src.openFileHandle(), modelId.path);
+//            h5_tgt.copyLinkFromLocation(tgtModelPath, h5_src.openFileHandle(), modelId.path);
             tgtModelDb[tgtModelPath] = h5_tgt.getTableInfo(tgtModelPath);
             // Now copy some helpful scalar datasets. This data is available in the attributes of the table
             // above but this is also handy
@@ -190,6 +202,8 @@ namespace tools::h5io {
                 h5_tgt.writeDataset(modelId.p.J1_wdth, fmt::format("{}/{}/model/J1_wdth", tgt_base, algo));
                 h5_tgt.writeDataset(modelId.p.J2_wdth, fmt::format("{}/{}/model/J2_wdth", tgt_base, algo));
                 h5_tgt.writeDataset(modelId.p.J3_wdth, fmt::format("{}/{}/model/J3_wdth", tgt_base, algo));
+                h5_tgt.writeDataset(modelId.p.f_mixer, fmt::format("{}/{}/model/f_mixer", tgt_base, algo));
+                h5_tgt.writeDataset(modelId.p.u_layer, fmt::format("{}/{}/model/u_layer", tgt_base, algo));
             }
         }
         tools::prof::t_ham.toc();
