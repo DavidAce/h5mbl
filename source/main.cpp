@@ -21,11 +21,12 @@ void print_usage() {
 Usage                       : ./cpp_merger [-option <value>].
 -h                          : Help. Shows this text.
 -b <base_dir>               : Default base directory (default /mnt/Barracuda/Projects/mbl_transition)
+-f                          : Require that src file has finished
 -m <max files>              : Max number of files to merge (default = 10000)
+-n <tgt_filename>           : Target filename (default merged.h5)
 -o <src_out>                : Name of the output directory inside the root directory (default = "")
 -s <src_dir>                : Root directory for the output files. Supports pattern matching for relative paths.
 -t <tgt_dir>                : Target directory for the single output file
--f <tgt_filename>           : Target filename (default merged.h5)
 -v <level>                  : Enables verbosity. Default level 1 (0 is max verbosity)
 -V <level>                  : Enables trace-level verbosity of h5pp. Default level 1 (0 is max verbosity)
 )";
@@ -61,22 +62,26 @@ int main(int argc, char *argv[]) {
     std::string                 src_out  = "output";
     std::string                 tgt_file = "merged.h5";
     h5pp::fs::path              tgt_dir;
+    bool                        finished       = false;
     size_t                      verbosity      = 2;
     size_t                      verbosity_h5pp = 2;
     size_t                      max_files      = 1000000;
     size_t                      max_dirs       = 10000;
+    long                        seed_min       = 0;
+    long                        seed_max       = 10000000;
 
     while(true) {
-        char opt = static_cast<char>(getopt(argc, argv, "hb:f:m:o:s:t:v:V:"));
+        char opt = static_cast<char>(getopt(argc, argv, "hb:fm:n:o:s:t:v:V:"));
         if(opt == EOF) break;
         if(optarg == nullptr)
             tools::logger::log->info("Parsing input argument: -{}", opt);
         else
             tools::logger::log->info("Parsing input argument: -{} {}", opt, optarg);
         switch(opt) {
-            case 'b': default_base = h5pp::fs::canonical(optarg);
-            case 'f': tgt_file = std::string(optarg); continue;
+            case 'b': default_base = h5pp::fs::canonical(optarg); continue;
+            case 'f': finished = true; continue;
             case 'm': max_files = std::strtoul(optarg, nullptr, 10); continue;
+            case 'n': tgt_file = std::string(optarg); continue;
             case 'o': src_out = std::string(optarg); continue;
             case 's': {
                 h5pp::fs::path src_dir = optarg;
@@ -121,7 +126,7 @@ int main(int argc, char *argv[]) {
     std::vector<std::string> point_keys = {"finished", "checkpoint/iter_*"};
 
     std::vector<std::string> models = {"hamiltonian"};
-    std::vector<std::string> tables = {"measurements", "profiling", "status", "mem_usage"};
+    std::vector<std::string> tables = {"profiling", "status", "mem_usage"};
     std::vector<std::string> cronos = {"measurements", "status"};
     //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
     std::vector<DsetKey> dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
@@ -227,7 +232,7 @@ int main(int argc, char *argv[]) {
                 break;
             } else
                 file_counter[src_base] = 0;
-        } else if(counter_exists and file_counter[src_base] >= max_files) {
+        } else if(file_counter[src_base] >= max_files) {
             if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
             continue;
         }
@@ -240,11 +245,13 @@ int main(int argc, char *argv[]) {
         tools::prof::t_hsh.tic();
         auto src_hash = tools::hash::md5_file_meta(src_abs);
         auto src_seed = tools::parse::extract_digits_from_h5_filename<long>(src_rel.filename());
-        //        if(src_seed < 140000){
-        //            if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
-        //            if(tools::prof::t_hsh.is_measuring) tools::prof::t_hsh.toc();
-        //            continue;
-        //        }
+        if (src_seed !=  std::clamp<long>(src_seed,seed_min, seed_max)){
+                        if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
+                        if(tools::prof::t_hsh.is_measuring) tools::prof::t_hsh.toc();
+                        tools::logger::log->warn("Skipping seed {}: Valid are [{}-{}]",src_seed, seed_min, seed_max);
+                        continue;
+        }
+
         FileId fileId(src_seed, src_abs.string(), src_hash);
 
         // We check if it's in the file database
@@ -271,10 +278,20 @@ int main(int argc, char *argv[]) {
             h5_src.setKeepFileOpened();
             if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
         } catch(const std::exception &ex) {
-            tools::logger::log->warn("Skipping broken file: {}\n\tReason: {}\n", src_abs.string(), ex.what());
+            tools::logger::log->warn("Skipping broken file: {}\n\tReason: {}", src_abs.string(), ex.what());
             if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
             continue;
         }
+
+        if(not h5_src.linkExists("common/finished_all")){
+            tools::logger::log->warn("Skipping broken file: {}\n\tReason: Could not find dataset [common/finished_all]", src_abs.string());
+            continue;
+        }
+        if(finished and not h5_src.readDataset<bool>("common/finished_all")) {
+            tools::logger::log->warn("Skipping broken file: {}\n\tReason: Simulation has not finished", src_abs.string());
+            continue;
+        }
+
 
         // Define reusable source Info
         static std::unordered_map<std::string, h5pp::TableInfo> srcTableDb;
