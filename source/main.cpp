@@ -121,13 +121,13 @@ int main(int argc, char *argv[]) {
     h5pp::fs::path tgt_path = tgt_dir / tgt_file;
     tools::logger::log->info("Merge into target file {}", tgt_path.string());
 
-    std::vector<std::string> algo_keys  = {"LBIT"};
+    std::vector<std::string> algo_keys  = {"xDMRG"};
     std::vector<std::string> state_keys = {"state_*"};
     std::vector<std::string> point_keys = {"finished", "checkpoint/iter_*"};
 
     std::vector<std::string> models = {"hamiltonian"};
-    std::vector<std::string> tables = {"profiling", "status", "mem_usage"};
-    std::vector<std::string> cronos = {"measurements", "status"};
+    std::vector<std::string> tables = {"measurements", "profiling", "status", "mem_usage"};
+    std::vector<std::string> cronos = {};
     //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
     std::vector<DsetKey> dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
                                   {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
@@ -296,7 +296,7 @@ int main(int argc, char *argv[]) {
         // Define reusable source Info
         static std::unordered_map<std::string, h5pp::TableInfo> srcTableDb;
         static std::unordered_map<std::string, h5pp::DsetInfo>  srcDsetDb;
-        static std::unordered_map<std::string, ModelId<lbit>>   srcModelDb;
+        static std::unordered_map<std::string, ModelId<sdual>>   srcModelDb;
 
         // Start finding the required components in the source
         //        std::vector<std::string> groups;
