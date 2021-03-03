@@ -17,7 +17,7 @@ namespace tools::parse {
             if constexpr(std::is_same<T, bool>::value) {
                 if(param_val == "true") return true;
                 if(param_val == "false") return false;
-                throw std::runtime_error(h5pp::format("Expected true or false, got {}", param_val));
+                throw std::range_error(h5pp::format("Expected true or false, got {}", param_val));
             }
             throw std::runtime_error(h5pp::format("Type mismatch on parameter: {}", param_val));
         } catch(std::exception &ex) { throw std::runtime_error(h5pp::format("Error parsing param: {}", ex.what())); } catch(...) {
@@ -37,14 +37,11 @@ namespace tools::parse {
     }
 
     template<typename T>
-    [[nodiscard]] T extract_paramter_from_path(const std::string & input, const std::string & param_name){
-        std::string param_str = input.substr(input.find(param_name) + param_name.size(), input.find('/')-1);
+    [[nodiscard]] T extract_paramter_from_path(const std::string &input, const std::string &param_name) {
+        std::string param_str = input.substr(input.find(param_name) + param_name.size(), input.find('/') - 1);
         try {
             return parse_param<T>(param_str, input);
-        } catch(const std::exception &err) {
-            throw std::runtime_error(h5pp::format("Could not convert {} to a number: {}", input, err.what()));
-        }
+        } catch(const std::exception &err) { throw std::runtime_error(h5pp::format("Could not convert {} to a number: {}", input, err.what())); }
     }
-
 
 }

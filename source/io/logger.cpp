@@ -16,7 +16,7 @@ void tools::logger::disableTimeStamp(std::shared_ptr<spdlog::logger> &log) {
 }
 
 void tools::logger::setLogLevel(std::shared_ptr<spdlog::logger> &log, size_t levelZeroToSix) {
-    if(levelZeroToSix > 6) { throw std::runtime_error("Expected verbosity level integer in [0-6]. Got: " + std::to_string(levelZeroToSix)); }
+    if(levelZeroToSix > 6) { throw std::logic_error("Expected verbosity level integer in [0-6]. Got: " + std::to_string(levelZeroToSix)); }
     auto lvlEnum = static_cast<spdlog::level::level_enum>(levelZeroToSix);
 
     // Set console settings

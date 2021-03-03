@@ -21,7 +21,6 @@ class class_tic_toc {
     std::string name;
     bool        enable          = true; // Whether we are profiling or not.
     int         print_precision = 5;
-    int         padding         = 5;
 
     public:
     bool is_measuring = false;
@@ -29,15 +28,12 @@ class class_tic_toc {
     class_tic_toc();
     void                      tic();
     void                      toc();
+
     void                      reset();
     void                      set_properties(bool on_off, int prec, std::string output_text);
     void                      set_label(std::string output_text);
     void                      set_measured_time(double measured_time);
     void                      start_lap();
-    void                      print_age() const;
-    void                      print_measured_time() const;
-    void                      print_last_time_interval() const;
-    void                      print_measured_time_w_percent(double cmp = std::numeric_limits<double>::quiet_NaN()) const;
     [[nodiscard]] std::string get_name() const;
     [[nodiscard]] double      get_age() const;
     [[nodiscard]] double      get_measured_time() const;
@@ -45,16 +41,20 @@ class class_tic_toc {
     [[nodiscard]] double      restart_lap();
     [[nodiscard]] double      get_lap() const;
 
-    [[nodiscard]] std::string string(double tgt = std::numeric_limits<double>::quiet_NaN(), double cmp = std::numeric_limits<double>::quiet_NaN()) const;
-    [[nodiscard]] std::string string_age() const;
-    [[nodiscard]] std::string string_measured_time() const;
-    [[nodiscard]] std::string string_last_interval() const;
-    [[nodiscard]] std::string string_measured_time_w_percent(double cmp = std::numeric_limits<double>::quiet_NaN()) const;
-
     class_tic_toc &      operator=(double other_time_in_seconds);
     class_tic_toc &      operator+=(double other_time_in_seconds);
     class_tic_toc &      operator-=(double other_time_in_seconds);
     class_tic_toc &      operator+=(const class_tic_toc &rhs);
     class_tic_toc &      operator-=(const class_tic_toc &rhs);
-    friend std::ostream &operator<<(std::ostream &, const class_tic_toc &);
+
+    class token {
+        class_tic_toc & t;
+        public:
+        explicit token(class_tic_toc & t_);
+        ~token() noexcept;
+        void tic();
+        void toc();
+    };
+    [[nodiscard]] token tic_token(); // Gives a token RAII-style tic-toc: toc() is called by destructor!
+
 };

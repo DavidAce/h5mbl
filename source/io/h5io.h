@@ -31,15 +31,15 @@ namespace tools::h5io {
                                         const std::vector<DsetKey> &srcDsetMetas);
 
     void transferDatasets(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::DsetInfo>> &tgtDsetDb, const h5pp::File &h5_src,
-                          std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const std::string &groupPath, const std::vector<DsetKey> &srcDsetMetas,
+                          std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const std::string &groupPath, const std::vector<DsetKey> &srcDsetKeys,
                           const FileId &fileId);
 
     void transferTables(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
-                        const std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const std::string &groupPath,
+                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const std::string &groupPath,
                         const std::vector<std::string> &srcTableKeys, const FileId &fileId);
 
     void transferCronos(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
-                        const std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const std::string &groupPath,
+                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const std::string &groupPath,
                         const std::vector<std::string> &srcTableKeys, const FileId &fileId);
 
     void writeProfiling(h5pp::File &h5_tgt);

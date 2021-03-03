@@ -15,6 +15,7 @@ namespace tools::h5db {
         tools::prof::t_dat.tic();
         std::unordered_map<std::string, FileId> fileDatabase;
         if(h5_tgt.linkExists(".db/files")) {
+            tools::logger::log->info("Loading database files");
             auto database = h5_tgt.readTableRecords<std::vector<FileId>>(".db/files");
             for(auto &item : database) fileDatabase[item.path] = item;
         }
@@ -27,33 +28,49 @@ namespace tools::h5db {
         tools::prof::t_dat.tic();
         std::unordered_map<std::string, InfoId<InfoType>> infoDataBase;
         auto                                              dbGroups = h5_tgt.findGroups(".db");
-        for(auto &dbGroup : dbGroups) {
-            // Find table databases
-            for(auto &meta : metas) {
-                std::vector<std::string> dbNames;
-                if constexpr(std::is_same_v<MetaType, std::string>)
-                    dbNames = h5_tgt.findDatasets(meta, dbGroup, -1, 0);
-                else if constexpr(std::is_same_v<MetaType, DsetKey>)
-                    dbNames = h5_tgt.findDatasets(meta.name, dbGroup, -1, 0);
-                if(dbNames.empty()) continue;
-                if(dbNames.size() > 1) throw std::logic_error(h5pp::format("Found multiple seed databases: {}", dbNames));
-                h5pp::print("Loading database {}\n", dbNames.front());
-                // Now we have to load our database, which itself is a table with fields [seed,index].
-                // It also has a [key] attribute so that we can place it in our map, as well as a [path]
-                // attribute to find the actual table
-                auto dbPath   = h5pp::format("{}/{}", dbGroup, dbNames.front());
-                auto seedIdDb = h5_tgt.readTableRecords<std::vector<SeedId>>(dbPath);
-                auto infoKey  = h5_tgt.readAttribute<std::string>("key", dbPath);
-                auto infoPath = h5_tgt.readAttribute<std::string>("path", dbPath);
-                if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>)
-                    infoDataBase[infoKey] = h5_tgt.getDatasetInfo(infoPath);
-                else if constexpr(std::is_same_v<InfoType, h5pp::TableInfo>)
-                    infoDataBase[infoKey] = h5_tgt.getTableInfo(infoPath);
-                auto &infoId = infoDataBase[infoKey];
-                // We can now load the seed/index database it into the map
-                for(auto &seedId : seedIdDb) infoId.db[seedId.seed] = seedId.index;
+        tools::logger::log->info("Found {} groups matching [.db]", dbGroups.size());
+
+        try {
+            for(auto &dbGroup : dbGroups) {
+                // Find table databases
+                tools::logger::log->info("Loading database group [{}]", dbGroup);
+                for(auto &meta : metas) {
+                    std::vector<std::string> dbNames;
+                    tools::logger::log->info("Searching for database");
+                    if constexpr(std::is_same_v<MetaType, std::string>)
+                        dbNames = h5_tgt.findDatasets(meta, dbGroup, -1, 0);
+                    else if constexpr(std::is_same_v<MetaType, DsetKey>)
+                        dbNames = h5_tgt.findDatasets(meta.name, dbGroup, -1, 0);
+                    tools::logger::log->info("Found database names {}", dbNames);
+                    if(dbNames.empty()) continue;
+                    if(dbNames.size() > 1) throw std::logic_error(h5pp::format("Found multiple seed databases: {}", dbNames));
+                    tools::logger::log->info("Loading database {}", dbNames);
+                    // Now we have to load our database, which itself is a table with fields [seed,index].
+                    // It also has a [key] attribute so that we can place it in our map, as well as a [path]
+                    // attribute to find the actual table
+                    auto dbPath = h5pp::format("{}/{}", dbGroup, dbNames.front());
+                    tools::logger::log->info("readTableRecortds({}) ", dbPath);
+                    auto seedIdDb = h5_tgt.readTableRecords<std::vector<SeedId>>(dbPath);
+                    tools::logger::log->info("readAttribute(key,{}) ", dbPath);
+                    auto infoKey = h5_tgt.readAttribute<std::string>("key", dbPath);
+                    tools::logger::log->info("readAttribute(path,{}) ", dbPath);
+                    auto infoPath = h5_tgt.readAttribute<std::string>("path", dbPath);
+                    tools::logger::log->info("getDatasetInfo(path,{}) ", infoPath);
+                    if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>)
+                        infoDataBase[infoKey] = h5_tgt.getDatasetInfo(infoPath);
+                    else if constexpr(std::is_same_v<InfoType, h5pp::TableInfo>)
+                        infoDataBase[infoKey] = h5_tgt.getTableInfo(infoPath);
+                    auto &infoId = infoDataBase[infoKey];
+                    // We can now load the seed/index database it into the map
+                    tools::logger::log->info("Loading seeds from database");
+                    for(auto &seedId : seedIdDb) infoId.db[seedId.seed] = seedId.index;
+                }
             }
+        } catch(const std::exception &ex) {
+            tools::prof::t_dat.toc();
+            throw;
         }
+
         tools::prof::t_dat.toc();
         return infoDataBase;
     }
@@ -114,6 +131,7 @@ namespace tools::h5db {
         std::optional<h5pp::AttrInfo>  attrInfoKey;
         std::optional<h5pp::AttrInfo>  attrInfoPath;
         std::optional<h5pp::TableInfo> tableInfo;
+        h5_tgt.setKeepFileOpened();
         for(auto &[infoKey, infoId] : infoDb) {
             std::vector<SeedId> seedIdxVec;
             for(auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
@@ -159,6 +177,7 @@ namespace tools::h5db {
             if(seedIdxVec.empty()) continue;
             h5_tgt.writeTableRecords(seedIdxVec, tgtDbPath);
         }
+        h5_tgt.setKeepFileClosed();
         tools::prof::t_dat.toc();
     }
     template void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::DsetInfo>> &infoDb);
