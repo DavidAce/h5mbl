@@ -1,6 +1,8 @@
 [requires]
 h5pp/1.8.5@davidace/dev
 openssl/1.1.1h@
+# Temporarily fix fmt version since 7.1.2 broke ostreams
+fmt/7.1.3@
 
 [generators]
 cmake

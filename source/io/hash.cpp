@@ -19,7 +19,7 @@ namespace tools::hash {
             while(not file.eof()) {
                 file.read(buf.data(), buf.size());
                 std::streamsize len = file.gcount();
-                if(len < 0) throw std::runtime_error("len < 0");
+                if(len < 0) throw std::length_error("file streamsize len < 0");
                 SHA256_Update(&sha256, buf.data(), static_cast<size_t>(len));
             }
             std::array<unsigned char, SHA256_DIGEST_LENGTH> hex = {};

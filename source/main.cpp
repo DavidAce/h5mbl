@@ -6,6 +6,7 @@
 #include <h5pp/h5pp.h>
 #include <io/find.h>
 #include <io/h5db.h>
+#include <io/h5dbg.h>
 #include <io/h5io.h>
 #include <io/hash.h>
 #include <io/id.h>
@@ -27,8 +28,8 @@ Usage                       : ./cpp_merger [-option <value>].
 -o <src_out>                : Name of the output directory inside the root directory (default = "")
 -s <src_dir>                : Root directory for the output files. Supports pattern matching for relative paths.
 -t <tgt_dir>                : Target directory for the single output file
--v <level>                  : Enables verbosity. Default level 1 (0 is max verbosity)
--V <level>                  : Enables trace-level verbosity of h5pp. Default level 1 (0 is max verbosity)
+-v <level>                  : Enables verbosity. Default level 2 (0 is max verbosity)
+-V <level>                  : Enables trace-level verbosity of h5pp. Default level 2 (0 is max verbosity)
 )";
 }
 
@@ -110,7 +111,6 @@ int main(int argc, char *argv[]) {
         break;
     }
     tools::logger::setLogLevel(tools::logger::log, verbosity);
-    tools::logger::log->set_level(spdlog::level::info);
     tools::logger::log->info("Started h5mbl from directory {}", h5pp::fs::current_path());
     if(src_dirs.empty()) throw std::runtime_error("Source directories are required. Pass -s <dirpath> (one or more times)");
     for(auto &src_dir : src_dirs) {
@@ -131,6 +131,7 @@ int main(int argc, char *argv[]) {
     //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
     std::vector<DsetKey> dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
                                   {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
+                                  {Type::DOUBLE, Size::FIX, "number_entropies", ""},
                                   {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
                                   {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
 
@@ -139,9 +140,9 @@ int main(int argc, char *argv[]) {
     // Open the target file
 
     h5pp::File h5_tgt(tgt_path, h5pp::FilePermission::READWRITE, verbosity_h5pp);
-    h5_tgt.setDriver_core();
+    //    h5_tgt.setDriver_core();
     h5_tgt.setCompressionLevel(3);
-    h5_tgt.setKeepFileOpened();
+    //    h5_tgt.setKeepFileOpened();
     if(not h5_tgt.linkExists("git/h5mbl")) {
         // Put git metadata in the target file
         h5_tgt.writeDataset(GIT::BRANCH, "git/h5mbl/branch");
@@ -245,18 +246,18 @@ int main(int argc, char *argv[]) {
         tools::prof::t_hsh.tic();
         auto src_hash = tools::hash::md5_file_meta(src_abs);
         auto src_seed = tools::parse::extract_digits_from_h5_filename<long>(src_rel.filename());
-        if (src_seed !=  std::clamp<long>(src_seed,seed_min, seed_max)){
-                        if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
-                        if(tools::prof::t_hsh.is_measuring) tools::prof::t_hsh.toc();
-                        tools::logger::log->warn("Skipping seed {}: Valid are [{}-{}]",src_seed, seed_min, seed_max);
-                        continue;
+        if(src_seed != std::clamp<long>(src_seed, seed_min, seed_max)) {
+            if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
+            if(tools::prof::t_hsh.is_measuring) tools::prof::t_hsh.toc();
+            tools::logger::log->warn("Skipping seed {}: Valid are [{}-{}]", src_seed, seed_min, seed_max);
+            continue;
         }
 
         FileId fileId(src_seed, src_abs.string(), src_hash);
 
         // We check if it's in the file database
         auto status = tools::h5db::getFileIdStatus(tgtFileDb, fileId);
-        tools::logger::log->info("Found path: {} | {} | {}", src_rel.string(), enum2str(status), src_hash);
+        tools::logger::log->info("Found file: {} | {} | {}", src_rel.string(), enum2str(status), src_hash);
         tgtFileDb[fileId.path] = fileId;
         tools::prof::t_hsh.toc();
         if(status == FileIdStatus::UPTODATE) {
@@ -272,10 +273,9 @@ int main(int argc, char *argv[]) {
         h5pp::File h5_src;
         try {
             h5_src = h5pp::File(src_abs.string(), h5pp::FilePermission::READONLY, verbosity_h5pp);
-            //            h5_src.setDriver_core(false, 10 * 1024 * 1024);
-//            h5_src.setDriver_sec2();
-            h5_src.setDriver_core();
-            h5_src.setKeepFileOpened();
+            //                        h5_src.setDriver_core(false, 10 * 1024 * 1024);
+            h5_src.setDriver_sec2();
+            //            h5_src.setDriver_core();
             if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
         } catch(const std::exception &ex) {
             tools::logger::log->warn("Skipping broken file: {}\n\tReason: {}\n", src_abs.string(), ex.what());
@@ -283,15 +283,14 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        if(not h5_src.linkExists("common/finished_all")){
+        if(not h5_src.linkExists("common/finished_all")) {
             tools::logger::log->warn("Skipping broken file: {}\n\tReason: Could not find dataset [common/finished_all]", src_abs.string());
             continue;
         }
         if(finished and not h5_src.readDataset<bool>("common/finished_all")) {
-            tools::logger::log->warn("Skipping broken file: {}\n\tReason: Simulation has not finished", src_abs.string());
+            tools::logger::log->warn("Skipping file: {}\n\tReason: Simulation has not finished", src_abs.string());
             continue;
         }
-
 
         // Define reusable source Info
         static std::unordered_map<std::string, h5pp::TableInfo> srcTableDb;
@@ -299,7 +298,7 @@ int main(int argc, char *argv[]) {
         static std::unordered_map<std::string, ModelId<sdual>>   srcModelDb;
 
         // Start finding the required components in the source
-        //        std::vector<std::string> groups;
+        h5_src.setKeepFileOpened();
         tools::prof::t_gr1.tic();
         auto groups = tools::h5io::findKeys(h5_src, "/", algo_keys, -1, 0);
         //        groups = h5_src.findLinks(algo_key, "/", -1, 0);
@@ -330,18 +329,42 @@ int main(int argc, char *argv[]) {
                     try {
                         auto dsetKeys = tools::h5io::gatherDsetKeys(h5_src, srcDsetDb, srcGroupPath, dsets);
                         tools::h5io::transferDatasets(h5_tgt, tgtDsetDb, h5_src, srcDsetDb, tgtGroupPath, dsetKeys, fileId);
-                    } catch(const std::exception &ex) { tools::logger::log->warn("Dset transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
+                    } catch(const std::runtime_error &ex) { tools::logger::log->warn("Dset transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
+
                     try {
                         auto tableKeys = tools::h5io::gatherTableKeys(h5_src, srcTableDb, srcGroupPath, tables);
                         tools::h5io::transferTables(h5_tgt, tgtTableDb, srcTableDb, tgtGroupPath, tableKeys, fileId);
-                    } catch(const std::exception &ex) { tools::logger::log->warn("Table transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
+                    } catch(const std::runtime_error &ex) { tools::logger::log->error("Table transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
+
                     try {
                         auto cronoKeys = tools::h5io::gatherTableKeys(h5_src, srcTableDb, srcGroupPath, cronos);
                         tools::h5io::transferCronos(h5_tgt, tgtTableDb, srcTableDb, tgtGroupPath, cronoKeys, fileId);
-                    } catch(const std::exception &ex) { tools::logger::log->warn("Crono transfer failed in[{}]: {}", srcGroupPath, ex.what()); }
+                    } catch(const std::runtime_error &ex) { tools::logger::log->error("Crono transfer failed in[{}]: {}", srcGroupPath, ex.what()); }
                 }
             }
         }
+
+        auto ssize_objids = H5Fget_obj_count(h5_src.openFileHandle(), H5F_OBJ_DATASET | H5F_OBJ_GROUP | H5F_OBJ_ATTR);
+        if(ssize_objids > 0) {
+            auto               size_objids = static_cast<size_t>(ssize_objids);
+            std::vector<hid_t> objids(size_objids);
+            H5Fget_obj_ids(h5_src.openFileHandle(), H5F_OBJ_ALL, size_objids, objids.data());
+            tools::logger::log->warn("File [{}] has {} open ids: {}", h5_src.getFilePath(), size_objids, objids);
+            for(auto &id : objids) tools::logger::log->info("{}",tools::h5dbg::get_hid_string_details(id));
+            throw std::logic_error(fmt::format("File [{}] has {} open ids: {}", h5_src.getFilePath(), size_objids, objids));
+        } else if(ssize_objids < 0) {
+            tools::logger::log->error("File [{}] failed to count ids: {}", h5_src.getFilePath(), ssize_objids);
+        }
+
+        h5_src.setKeepFileClosed(); // This closes the permanent file-handle
+
+        // Check that there are no errors hiding in the HDF5 error-stack
+        auto num_errors = H5Eget_num(H5E_DEFAULT);
+        if(num_errors > 0) {
+            H5Eprint(H5E_DEFAULT, stderr);
+            throw std::runtime_error(fmt::format("Error when treating file [{}]", h5_src.getFilePath()));
+        }
+        H5Eprint(H5E_DEFAULT, stderr);
     }
 
     // TODO: Put the lines below in a "at quick exit" function
@@ -353,28 +376,49 @@ int main(int argc, char *argv[]) {
     tools::h5db::saveDatabase(h5_tgt, tgtModelDb);
     tools::h5db::saveDatabase(h5_tgt, tgtTableDb);
     tools::h5db::saveDatabase(h5_tgt, tgtDsetDb);
+    tgtFileDb.clear();
+    tgtModelDb.clear();
+    tgtTableDb.clear();
+    tgtDsetDb.clear();
+
+    auto ssize_objids = H5Fget_obj_count(h5_tgt.openFileHandle(), H5F_OBJ_ALL);
+    if(ssize_objids > 0) {
+        auto               size_objids = static_cast<size_t>(ssize_objids);
+        std::vector<hid_t> objids(size_objids);
+        H5Fget_obj_ids(h5_tgt.openFileHandle(), H5F_OBJ_ALL, size_objids, objids.data());
+        tools::logger::log->info("File [{}] has {} open ids: {}", h5_tgt.getFilePath(), size_objids, objids);
+        for(auto &id : objids) tools::logger::log->info("{}",tools::h5dbg::get_hid_string_details(id));
+    } else if(ssize_objids < 0) {
+        tools::logger::log->info("File [{}] failed to count ids: {}", h5_tgt.getFilePath(), ssize_objids);
+    }
+    //    h5_tgt.setKeepFileClosed();
+    // Check that there are no errors hiding in the HDF5 error-stack
+    auto num_errors = H5Eget_num(H5E_DEFAULT);
+    if(num_errors > 0) {
+        H5Eprint(H5E_DEFAULT, stderr);
+        throw std::runtime_error(fmt::format("Error when treating file [{}]", h5_tgt.getFilePath()));
+    }
 
     tools::prof::t_tot.toc();
-    tools::prof::t_itr.print_measured_time();
-    tools::prof::t_pre.print_measured_time();
-    tools::prof::t_gr1.print_measured_time();
-    tools::prof::t_gr2.print_measured_time();
-    tools::prof::t_gr3.print_measured_time();
-    tools::prof::t_get.print_measured_time();
-    tools::prof::t_tab.print_measured_time();
-    tools::prof::t_dst.print_measured_time();
-    tools::prof::t_crt.print_measured_time();
-    tools::prof::t_ham.print_measured_time();
-    tools::prof::t_dat.print_measured_time();
-    tools::prof::t_hsh.print_measured_time();
-    fmt::print("Added  time: {:.5}\n",
-               tools::prof::t_itr.get_measured_time() + tools::prof::t_pre.get_measured_time() + tools::prof::t_gr1.get_measured_time() +
-                   tools::prof::t_gr2.get_measured_time() + tools::prof::t_gr3.get_measured_time() + tools::prof::t_get.get_measured_time() +
-                   tools::prof::t_tab.get_measured_time() + tools::prof::t_dst.get_measured_time() + tools::prof::t_ren.get_measured_time() +
-                   tools::prof::t_crt.get_measured_time() + tools::prof::t_ham.get_measured_time() + tools::prof::t_dat.get_measured_time() +
-                   tools::prof::t_hsh.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_itr.get_name(), tools::prof::t_itr.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_pre.get_name(), tools::prof::t_pre.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_gr1.get_name(), tools::prof::t_gr1.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_gr2.get_name(), tools::prof::t_gr2.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_gr3.get_name(), tools::prof::t_gr3.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_get.get_name(), tools::prof::t_get.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_tab.get_name(), tools::prof::t_tab.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_dst.get_name(), tools::prof::t_dst.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_crt.get_name(), tools::prof::t_crt.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_ham.get_name(), tools::prof::t_ham.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_dat.get_name(), tools::prof::t_dat.get_measured_time());
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_hsh.get_name(), tools::prof::t_hsh.get_measured_time());
+    fmt::print("Added time: {:.5}\n", tools::prof::t_itr.get_measured_time() + tools::prof::t_pre.get_measured_time() + tools::prof::t_gr1.get_measured_time() +
+                                          tools::prof::t_gr2.get_measured_time() + tools::prof::t_gr3.get_measured_time() +
+                                          tools::prof::t_get.get_measured_time() + tools::prof::t_tab.get_measured_time() +
+                                          tools::prof::t_dst.get_measured_time() + tools::prof::t_ren.get_measured_time() +
+                                          tools::prof::t_crt.get_measured_time() + tools::prof::t_ham.get_measured_time() +
+                                          tools::prof::t_dat.get_measured_time() + tools::prof::t_hsh.get_measured_time());
     // Around 15 % overhead comes from closing the h5f, h5d and h5t members of DsetInfo and TableInfo objects
-    tools::prof::t_tot.print_measured_time();
-
+    tools::logger::log->info("{}: {:.5f}", tools::prof::t_tot.get_name(), tools::prof::t_tot.get_measured_time());
     tools::logger::log->info("Results written to file {}", tgt_path.string());
 }

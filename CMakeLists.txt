@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 project(h5mbl VERSION 0.1.0 DESCRIPTION "Merges MBL batch data in HDF5 format using h5mbl")
-option(H5MBL_PRINT_INFO "Print CMake target information"                              ON)
+option(H5MBL_PRINT_INFO "Print CMake target information"                               ON)
 option(H5MBL_ENABLE_ASAN "Enable runtime address sanitizer -fsanitize=address"         OFF)
 option(H5MBL_ENABLE_CCACHE "Enable runtime address sanitizer -fsanitize=address"       ON)
 
@@ -22,6 +22,7 @@ add_executable(${PROJECT_NAME}
         source/io/h5db.cpp
         source/io/h5io.cpp
         source/io/id.cpp
+        source/io/h5dbg.cpp
         source/general/prof.cpp
         source/general/text.cpp
         source/general/class_tic_toc.cpp

@@ -3,10 +3,7 @@
 //
 
 #include "class_tic_toc.h"
-#include <cmath>
-#include <iomanip>
-#include <iostream>
-#include <utility>
+#include <stdexcept>
 
 class_tic_toc::class_tic_toc() : class_tic_toc(true, 5, "") {}
 
@@ -19,7 +16,7 @@ class_tic_toc::class_tic_toc(bool on_off, int prec, std::string output_text) : n
 
 void class_tic_toc::tic() {
     if(enable) {
-        if(is_measuring) throw std::runtime_error("Called tic() twice on timer [" + name + "]: this timer is already measuring");
+        if(is_measuring) throw std::runtime_error("Called tic() twice: this timer is already measuring: " + name);
         tic_timepoint = std::chrono::high_resolution_clock::now();
         is_measuring  = true;
     }
@@ -27,7 +24,7 @@ void class_tic_toc::tic() {
 
 void class_tic_toc::toc() {
     if(enable) {
-        if(not is_measuring) throw std::runtime_error("Called toc() twice or without prior tic() on timer [" + name + "]");
+        if(not is_measuring) throw std::runtime_error("Called toc() twice or without prior tic()");
         toc_timepoint = std::chrono::high_resolution_clock::now();
         delta_time    = toc_timepoint - tic_timepoint;
         measured_time += delta_time;
@@ -35,6 +32,9 @@ void class_tic_toc::toc() {
         is_measuring = false;
     }
 }
+
+class_tic_toc::token class_tic_toc::tic_token() {return class_tic_toc::token(*this);}
+
 
 void class_tic_toc::set_properties(bool on_off, int prec, std::string output_text) { *this = class_tic_toc(on_off, prec, std::move(output_text)); }
 
@@ -82,46 +82,6 @@ double class_tic_toc::restart_lap() {
     return lap;
 }
 
-void class_tic_toc::print_age() const {
-    if(enable) { std::cout << string_age() << std::endl; }
-}
-
-void class_tic_toc::print_measured_time() const {
-    if(enable) { std::cout << string_measured_time() << std::endl; }
-}
-
-void class_tic_toc::print_last_time_interval() const {
-    if(enable) { std::cout << string_last_interval() << std::endl; }
-}
-
-void class_tic_toc::print_measured_time_w_percent(double cmp) const {
-    if(enable) { std::cout << string_measured_time_w_percent(cmp) << std::endl; }
-}
-
-std::string class_tic_toc::string(double tgt, double cmp) const {
-    if(enable) {
-        if(std::isnan(tgt)) tgt = get_measured_time();
-        std::stringstream sstr;
-        sstr << name << std::fixed << std::setprecision(print_precision) << std::setw(print_precision + padding) << std::left << tgt;
-        if(not std::isnan(cmp))
-            sstr << std::fixed << std::setprecision(print_precision) << std::setw(print_precision + padding) << std::right << 100.0 * tgt / cmp << " % \n";
-        return sstr.str();
-    } else
-        return std::string();
-}
-
-std::string class_tic_toc::string_age() const { return class_tic_toc::string(get_age()); }
-
-std::string class_tic_toc::string_measured_time() const { return class_tic_toc::string(); }
-
-std::string class_tic_toc::string_last_interval() const {
-    return class_tic_toc::string(std::chrono::duration_cast<std::chrono::duration<double>>(delta_time).count());
-}
-
-std::string class_tic_toc::string_measured_time_w_percent(double cmp) const {
-    if(std::isnan(cmp)) cmp = get_age();
-    return string(get_measured_time(), cmp);
-}
 
 void class_tic_toc::reset() {
     if(enable) {
@@ -135,33 +95,58 @@ void class_tic_toc::reset() {
 }
 
 class_tic_toc &class_tic_toc::operator=(double other_time_in_seconds) {
-    this->measured_time = std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
-    this->delta_time    = this->measured_time;
+    if(enable){
+        this->measured_time = std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
+        this->delta_time    = this->measured_time;
+    }
     return *this;
 }
 
 class_tic_toc &class_tic_toc::operator+=(double other_time_in_seconds) {
-    this->measured_time += std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
-    this->delta_time = std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
+    if(enable){
+        this->measured_time += std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
+        this->delta_time = std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
+    }
     return *this;
 }
 
 class_tic_toc &class_tic_toc::operator-=(double other_time_in_seconds) {
-    this->measured_time -= std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
-    this->delta_time = -std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
+    if(enable){
+        this->measured_time -= std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
+        this->delta_time = -std::chrono::duration_cast<hresclock::duration>(std::chrono::duration<double>(other_time_in_seconds));
+    }
     return *this;
 }
 
 class_tic_toc &class_tic_toc::operator+=(const class_tic_toc &rhs) {
-    this->measured_time += rhs.measured_time;
-    this->delta_time = rhs.measured_time;
+    if(enable) {
+        this->measured_time += rhs.measured_time;
+        this->delta_time = rhs.measured_time;
+    }
     return *this;
 }
 
 class_tic_toc &class_tic_toc::operator-=(const class_tic_toc &rhs) {
-    this->measured_time -= rhs.measured_time;
-    this->delta_time = -rhs.measured_time;
+    if(enable){
+        this->measured_time -= rhs.measured_time;
+        this->delta_time = -rhs.measured_time;
+    }
     return *this;
 }
 
-std::ostream &operator<<(std::ostream &os, const class_tic_toc &t) { return os << t.string(); }
+
+
+class_tic_toc::token::token(class_tic_toc &t_) :t(t_){
+    if(not t.is_measuring) t.tic();
+}
+
+class_tic_toc::token::~token() noexcept {
+    try{
+        if(t.is_measuring) t.toc();
+    }catch(const std::exception & ex){
+        fprintf(stderr,"Exception in token destructor: %s", ex.what());
+    }
+}
+
+void class_tic_toc::token::tic() {t.tic();}
+void class_tic_toc::token::toc() {t.toc();}
