@@ -121,21 +121,43 @@ int main(int argc, char *argv[]) {
     h5pp::fs::path tgt_path = tgt_dir / tgt_file;
     tools::logger::log->info("Merge into target file {}", tgt_path.string());
 
-    std::vector<std::string> algo_keys  = {"xDMRG"};
-    std::vector<std::string> state_keys = {"state_*"};
-    std::vector<std::string> point_keys = {"finished", "checkpoint/iter_*"};
 
-    std::vector<std::string> models = {"hamiltonian"};
-    std::vector<std::string> tables = {"measurements", "profiling", "status", "mem_usage"};
-    std::vector<std::string> cronos = {};
-    //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
-    std::vector<DsetKey> dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
-                                  {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
-                                  {Type::DOUBLE, Size::FIX, "number_entropies", ""},
-                                  {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
-                                  {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
+    using ModelT = sdual;
+//    using ModelT = lbit;
+    std::vector<std::string> algo_keys, state_keys,point_keys, models,tables,cronos;
+    std::vector<DsetKey> dsets;
+    DsetKey bonds;
+    if constexpr(std::is_same_v<ModelT,sdual>){
+        algo_keys  = {"xDMRG"};
+        state_keys = {"state_*"};
+        point_keys = {"finished", "checkpoint/iter_*"};
+        models = {"hamiltonian"};
+        tables = {"measurements", "profiling", "status", "mem_usage"};
+        cronos = {};
+        //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
 
-    DsetKey bonds{Type::COMPLEX, Size::VAR, "L_", ""};
+        dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
+                 {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
+                 {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
+                 {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
+        bonds = DsetKey{Type::COMPLEX, Size::VAR, "L_", ""};
+    }else if constexpr(std::is_same_v<ModelT,lbit>){
+        algo_keys  = {"fLBIT"};
+        state_keys = {"state_*"};
+        point_keys = {"finished", "checkpoint/iter_*"};
+        models = {"hamiltonian"};
+        tables = {"profiling", "status", "mem_usage"};
+        cronos = {"measurements", "status"};
+        dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
+                 {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
+                 {Type::DOUBLE, Size::FIX, "number_entropies", ""},
+                 {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
+                 {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
+        bonds = DsetKey{Type::COMPLEX, Size::VAR, "L_", ""};
+    }
+
+
+
 
     // Open the target file
 
@@ -295,7 +317,7 @@ int main(int argc, char *argv[]) {
         // Define reusable source Info
         static std::unordered_map<std::string, h5pp::TableInfo> srcTableDb;
         static std::unordered_map<std::string, h5pp::DsetInfo>  srcDsetDb;
-        static std::unordered_map<std::string, ModelId<sdual>>   srcModelDb;
+        static std::unordered_map<std::string, ModelId<ModelT>> srcModelDb;
 
         // Start finding the required components in the source
         h5_src.setKeepFileOpened();
