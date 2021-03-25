@@ -18,6 +18,7 @@ struct lbit {
     double J1_mean, J2_mean, J3_mean;
     double J1_wdth, J2_wdth, J3_wdth;
     double J2_base;
+    size_t J2_span;
     double f_mixer;
     size_t u_layer;
 };

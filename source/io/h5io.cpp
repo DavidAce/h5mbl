@@ -72,7 +72,8 @@ namespace tools::h5io {
             std::string b_str      = fmt::format("b_{1:.{0}f}", decimals, H.p.J2_base);
             std::string f_str      = fmt::format("f_{1:.{0}f}", decimals, H.p.f_mixer);
             std::string u_str      = fmt::format("u_{}", H.p.u_layer);
-            return h5pp::format("L_{}/{}/{}/{}/{}/{}", H.model_size, J_mean_str, J_wdth_str, b_str, f_str, u_str);
+            std::string r_str      = fmt::format("r_{}", H.p.J2_span);
+            return h5pp::format("L_{}/{}/{}/{}/{}/{}/{}", H.model_size, J_mean_str, J_wdth_str, b_str, f_str, u_str,r_str);
         }
     }
     template std::string get_standardized_base(const ModelId<sdual> &H, int decimals);
@@ -161,6 +162,12 @@ namespace tools::h5io {
                     H.p.J2_base = tools::parse::extract_paramter_from_path<double>(h5_src.getFilePath(), "b_");
                     tools::logger::log->debug("Could not find model parameter: {} | Replaced with b=[{:.2f}]", ex.what(), H.p.J2_base);
                 }
+                try{
+                    H.p.J2_span = h5_src.readAttribute<size_t>("J2_span", modelPath);
+                }catch(const std::exception &ex){
+                    H.p.J2_span = tools::parse::extract_paramter_from_path<size_t>(h5_src.getFilePath(), "r_");
+                    tools::logger::log->debug("Could not find model parameter: {} | Replaced with r=[{}]", ex.what(), H.p.J2_span);
+                }
                 try {
                     H.p.f_mixer = h5_src.readAttribute<double>("f_mixer", modelPath);
                     H.p.u_layer = h5_src.readAttribute<size_t>("u_layer", modelPath);
@@ -210,6 +217,7 @@ namespace tools::h5io {
                 h5_tgt.writeDataset(modelId.p.J2_wdth, fmt::format("{}/{}/model/J2_wdth", tgt_base, algo));
                 h5_tgt.writeDataset(modelId.p.J3_wdth, fmt::format("{}/{}/model/J3_wdth", tgt_base, algo));
                 h5_tgt.writeDataset(modelId.p.J2_base, fmt::format("{}/{}/model/J2_base", tgt_base, algo));
+                h5_tgt.writeDataset(modelId.p.J2_span, fmt::format("{}/{}/model/J2_span", tgt_base, algo));
                 h5_tgt.writeDataset(modelId.p.f_mixer, fmt::format("{}/{}/model/f_mixer", tgt_base, algo));
                 h5_tgt.writeDataset(modelId.p.u_layer, fmt::format("{}/{}/model/u_layer", tgt_base, algo));
             }
@@ -334,7 +342,7 @@ namespace tools::h5io {
                     case Size::VAR: {
                         auto        srcGroupPath    = h5pp::fs::path(srcInfo.dsetPath.value()).parent_path().string();
                         std::string statusTablePath = fmt::format("{}/status", srcGroupPath);
-                        rows                        = h5_src.readTableField<long>(statusTablePath, "cfg_chi_lim_max", h5pp::TableSelection::FIRST);
+                        rows                        = h5_src.readTableField<long>(statusTablePath, "chi_lim_max", h5pp::TableSelection::FIRST);
                         break;
                     }
                 }
