@@ -334,7 +334,7 @@ namespace tools::h5io {
                     case Size::VAR: {
                         auto        srcGroupPath    = h5pp::fs::path(srcInfo.dsetPath.value()).parent_path().string();
                         std::string statusTablePath = fmt::format("{}/status", srcGroupPath);
-                        rows                        = h5_src.readTableField<long>(statusTablePath, "cfg_chi_lim_max", h5pp::TableSelection::FIRST);
+                        rows                        = h5_src.readTableField<long>(statusTablePath, "chi_lim_max", h5pp::TableSelection::FIRST);
                         break;
                     }
                 }
