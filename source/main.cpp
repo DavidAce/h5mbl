@@ -304,15 +304,20 @@ int main(int argc, char *argv[]) {
             if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
             continue;
         }
+        try{
+            if(not h5_src.linkExists("common/finished_all")) {
+                tools::logger::log->warn("Skipping broken file: {}\n\tReason: Could not find dataset [common/finished_all]", src_abs.string());
+                continue;
+            }
+            if(finished and not h5_src.readDataset<bool>("common/finished_all")) {
+                tools::logger::log->warn("Skipping file: {}\n\tReason: Simulation has not finished", src_abs.string());
+                continue;
+            }
+        }catch (const std::exception & ex){
+            tools::logger::log->warn("Skipping file: {}\n\tReason: {}", src_abs.string(), ex.what());
+            continue;
+        }
 
-        if(not h5_src.linkExists("common/finished_all")) {
-            tools::logger::log->warn("Skipping broken file: {}\n\tReason: Could not find dataset [common/finished_all]", src_abs.string());
-            continue;
-        }
-        if(finished and not h5_src.readDataset<bool>("common/finished_all")) {
-            tools::logger::log->warn("Skipping file: {}\n\tReason: Simulation has not finished", src_abs.string());
-            continue;
-        }
 
         // Define reusable source Info
         static std::unordered_map<std::string, h5pp::TableInfo> srcTableDb;
