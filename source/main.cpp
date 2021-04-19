@@ -69,7 +69,7 @@ int main(int argc, char *argv[]) {
     size_t                      max_files      = 1000000;
     size_t                      max_dirs       = 10000;
     long                        seed_min       = 0;
-    long                        seed_max       = 10000000;
+    long                        seed_max       = 100000000;
 
     while(true) {
         char opt = static_cast<char>(getopt(argc, argv, "hb:fm:n:o:s:t:v:V:"));
@@ -122,8 +122,8 @@ int main(int argc, char *argv[]) {
     tools::logger::log->info("Merge into target file {}", tgt_path.string());
 
 
-    using ModelT = sdual;
-//    using ModelT = lbit;
+//    using ModelT = sdual;
+    using ModelT = lbit;
     std::vector<std::string> algo_keys, state_keys,point_keys, models,tables,cronos;
     std::vector<DsetKey> dsets;
     DsetKey bonds;
