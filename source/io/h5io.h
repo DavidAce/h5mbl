@@ -1,11 +1,11 @@
 #pragma once
 #include <h5pp/details/h5ppInfo.h>
 #include <io/id.h>
+#include <io/h5db.h>
 #include <io/meta.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
 namespace h5pp {
     class File;
 }
@@ -41,6 +41,13 @@ namespace tools::h5io {
     void transferCronos(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
                         std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const std::string &groupPath,
                         const std::vector<std::string> &srcTableKeys, const FileId &fileId);
+
+
+
+    template<typename ModelType>
+    void merge(h5pp::File & h5_tgt, const h5pp::File & h5_src, const FileId & fileId, const tools::h5db::Keys & keys, tools::h5db::TgtDb & tgtdb, tools::h5db::SrcDb<ModelType> & srcdb );
+
+
 
     void writeProfiling(h5pp::File &h5_tgt);
 

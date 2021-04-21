@@ -7,6 +7,7 @@
 #include <io/logger.h>
 #include <io/meta.h>
 #include <io/parse.h>
+#include <io/h5dbg.h>
 #include <regex>
 #include <set>
 #include <string>
@@ -474,6 +475,88 @@ namespace tools::h5io {
         }
         h5_tgt.setKeepFileClosed();
     }
+
+
+
+    template<typename ModelType>
+    void merge(h5pp::File & h5_tgt, const h5pp::File & h5_src, const FileId & fileId,
+               const tools::h5db::Keys & keys, tools::h5db::TgtDb & tgtdb, tools::h5db::SrcDb<ModelType> & srcdb ){
+        // Start finding the required components in the source
+        h5_src.setKeepFileOpened();
+        tools::prof::t_gr1.tic();
+        auto groups = tools::h5io::findKeys(h5_src, "/", keys.algo, -1, 0);
+        //        groups = h5_src.findLinks(algo_key, "/", -1, 0);
+        tools::prof::t_gr1.toc();
+
+        for(const auto &algo : groups) {
+            auto  modelKey = tools::h5io::loadModel(h5_src, srcdb.model, algo);
+            auto &modelId  = srcdb.model.at(modelKey);
+            auto  tgt_base = tools::h5io::get_standardized_base(modelId);
+
+            // Start by storing the model if it hasn't already been
+            tools::h5io::saveModel(h5_src, h5_tgt, tgtdb.model, modelId);
+
+            // Next search for tables and datasets in the source file
+            // and transfer them to the target file
+
+            tools::prof::t_gr2.tic();
+            auto state_groups = tools::h5io::findKeys(h5_src, algo, keys.state, -1, 0);
+            tools::prof::t_gr2.toc();
+            for(const auto &state : state_groups) {
+                tools::prof::t_gr3.tic();
+                auto point_groups = tools::h5io::findKeys(h5_src, fmt::format("{}/{}", algo, state), keys.point, -1, 1);
+                tools::prof::t_gr3.toc();
+                for(const auto &point : point_groups) {
+                    auto srcGroupPath = fmt::format("{}/{}/{}", algo, state, point);
+                    auto tgtGroupPath = fmt::format("{}/{}/{}/{}", tgt_base, algo, state, point);
+                    // Try gathering all the tables
+                    try {
+                        auto dsetKeys = tools::h5io::gatherDsetKeys(h5_src, srcdb.dset, srcGroupPath, keys.dsets);
+                        tools::h5io::transferDatasets(h5_tgt, tgtdb.dset, h5_src, srcdb.dset, tgtGroupPath, dsetKeys, fileId);
+                    } catch(const std::runtime_error &ex) { tools::logger::log->warn("Dset transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
+
+                    try {
+                        auto tableKeys = tools::h5io::gatherTableKeys(h5_src, srcdb.table, srcGroupPath, keys.tables);
+                        tools::h5io::transferTables(h5_tgt, tgtdb.table, srcdb.table, tgtGroupPath, tableKeys, fileId);
+                    } catch(const std::runtime_error &ex) { tools::logger::log->error("Table transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
+
+                    try {
+                        auto cronoKeys = tools::h5io::gatherTableKeys(h5_src, srcdb.table, srcGroupPath, keys.cronos);
+                        tools::h5io::transferCronos(h5_tgt, tgtdb.table, srcdb.table, tgtGroupPath, cronoKeys, fileId);
+                    } catch(const std::runtime_error &ex) { tools::logger::log->error("Crono transfer failed in[{}]: {}", srcGroupPath, ex.what()); }
+                }
+            }
+        }
+
+
+
+        auto ssize_objids = H5Fget_obj_count(h5_src.openFileHandle(), H5F_OBJ_DATASET | H5F_OBJ_GROUP | H5F_OBJ_ATTR);
+        if(ssize_objids > 0) {
+            auto               size_objids = static_cast<size_t>(ssize_objids);
+            std::vector<hid_t> objids(size_objids);
+            H5Fget_obj_ids(h5_src.openFileHandle(), H5F_OBJ_ALL, size_objids, objids.data());
+            tools::logger::log->warn("File [{}] has {} open ids: {}", h5_src.getFilePath(), size_objids, objids);
+            for(auto &id : objids) tools::logger::log->info("{}",tools::h5dbg::get_hid_string_details(id));
+            throw std::logic_error(fmt::format("File [{}] has {} open ids: {}", h5_src.getFilePath(), size_objids, objids));
+        } else if(ssize_objids < 0) {
+            tools::logger::log->error("File [{}] failed to count ids: {}", h5_src.getFilePath(), ssize_objids);
+        }
+
+        h5_src.setKeepFileClosed(); // This closes the permanent file-handle
+
+        // Check that there are no errors hiding in the HDF5 error-stack
+        auto num_errors = H5Eget_num(H5E_DEFAULT);
+        if(num_errors > 0) {
+            H5Eprint(H5E_DEFAULT, stderr);
+            throw std::runtime_error(fmt::format("Error when treating file [{}]", h5_src.getFilePath()));
+        }
+        H5Eprint(H5E_DEFAULT, stderr);
+
+    }
+    template void merge(h5pp::File & h5_tgt, const h5pp::File & h5_src, const FileId & fileId,
+                        const tools::h5db::Keys & keys, tools::h5db::TgtDb & tgtdb, tools::h5db::SrcDb<ModelId<sdual>> & srcdb );
+    template void merge(h5pp::File & h5_tgt, const h5pp::File & h5_src, const FileId & fileId,
+                        const tools::h5db::Keys & keys, tools::h5db::TgtDb & tgtdb, tools::h5db::SrcDb<ModelId<lbit>> & srcdb );
 
     void writeProfiling(h5pp::File &h5_tgt) {
         H5T_profiling::register_table_type();

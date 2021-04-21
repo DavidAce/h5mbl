@@ -24,6 +24,7 @@ Usage                       : ./cpp_merger [-option <value>].
 -b <base_dir>               : Default base directory (default /mnt/Barracuda/Projects/mbl_transition)
 -f                          : Require that src file has finished
 -m <max files>              : Max number of files to merge (default = 10000)
+-M <model>                  : Choose [sdual|lbit] (default = sdual)
 -n <tgt_filename>           : Target filename (default merged.h5)
 -o <src_out>                : Name of the output directory inside the root directory (default = "")
 -s <src_dir>                : Root directory for the output files. Supports pattern matching for relative paths.
@@ -51,6 +52,10 @@ double compute_renyi(const std::vector<std::complex<double>> &S, double q) {
     return std::real(renyi_q(0));
 }
 
+
+
+
+
 int main(int argc, char *argv[]) {
     // Here we use getopt to parse CLI input
     // Note that CLI input always override config-file values
@@ -66,13 +71,14 @@ int main(int argc, char *argv[]) {
     bool                        finished       = false;
     size_t                      verbosity      = 2;
     size_t                      verbosity_h5pp = 2;
-    size_t                      max_files      = 1000000;
-    size_t                      max_dirs       = 10000;
-    long                        seed_min       = 0;
-    long                        seed_max       = 10000000;
+    size_t                      max_files      = std::numeric_limits<size_t>::max();
+    size_t                      max_dirs       = std::numeric_limits<size_t>::max();
+    long                        seed_min       = 0l;
+    long                        seed_max       = std::numeric_limits<long>::max();
+    Model                       model          = Model::SDUAL;
 
     while(true) {
-        char opt = static_cast<char>(getopt(argc, argv, "hb:fm:n:o:s:t:v:V:"));
+        char opt = static_cast<char>(getopt(argc, argv, "hb:fm:M:n:o:s:t:v:V:"));
         if(opt == EOF) break;
         if(optarg == nullptr)
             tools::logger::log->info("Parsing input argument: -{}", opt);
@@ -82,6 +88,7 @@ int main(int argc, char *argv[]) {
             case 'b': default_base = h5pp::fs::canonical(optarg); continue;
             case 'f': finished = true; continue;
             case 'm': max_files = std::strtoul(optarg, nullptr, 10); continue;
+            case 'M': model     = str2enum<Model>(std::string_view(optarg)); continue;
             case 'n': tgt_file = std::string(optarg); continue;
             case 'o': src_out = std::string(optarg); continue;
             case 's': {
@@ -121,46 +128,48 @@ int main(int argc, char *argv[]) {
     h5pp::fs::path tgt_path = tgt_dir / tgt_file;
     tools::logger::log->info("Merge into target file {}", tgt_path.string());
 
+    // Define which objects to consider for merging
+    tools::h5db::Keys keys;
+    switch(model){
+        case Model::SDUAL:{
+            keys.algo  = {"xDMRG"};
+            keys.state = {"state_*"};
+            keys.point = {"finished", "checkpoint/iter_*"};
+            keys.models = {"hamiltonian"};
+            keys.tables = {"measurements", "profiling", "status", "mem_usage"};
+            keys.cronos = {};
+            //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
 
-    using ModelT = sdual;
-//    using ModelT = lbit;
-    std::vector<std::string> algo_keys, state_keys,point_keys, models,tables,cronos;
-    std::vector<DsetKey> dsets;
-    DsetKey bonds;
-    if constexpr(std::is_same_v<ModelT,sdual>){
-        algo_keys  = {"xDMRG"};
-        state_keys = {"state_*"};
-        point_keys = {"finished", "checkpoint/iter_*"};
-        models = {"hamiltonian"};
-        tables = {"measurements", "profiling", "status", "mem_usage"};
-        cronos = {};
-        //    std::vector<std::string> dsets = {"bond_dimensions", "entanglement_entropies", "truncation_errors"};
-
-        dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
-                 {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
-                 {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
-                 {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
-        bonds = DsetKey{Type::COMPLEX, Size::VAR, "L_", ""};
-    }else if constexpr(std::is_same_v<ModelT,lbit>){
-        algo_keys  = {"fLBIT"};
-        state_keys = {"state_*"};
-        point_keys = {"finished", "checkpoint/iter_*"};
-        models = {"hamiltonian"};
-        tables = {"profiling", "status", "mem_usage"};
-        cronos = {"measurements", "status"};
-        dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
-                 {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
-                 {Type::DOUBLE, Size::FIX, "number_entropies", ""},
-                 {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
-                 {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
-        bonds = DsetKey{Type::COMPLEX, Size::VAR, "L_", ""};
+            keys.dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
+                     {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
+                     {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
+                     {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
+            keys.bonds = DsetKey{Type::COMPLEX, Size::VAR, "L_", ""};
+            break;
+        }
+        case Model::LBIT:{
+            keys.algo  = {"fLBIT"};
+            keys.state = {"state_*"};
+            keys.point = {"finished", "checkpoint/iter_*"};
+            keys.models = {"hamiltonian"};
+            keys.tables = {"profiling", "status", "mem_usage"};
+            keys.cronos = {"measurements", "status"};
+            keys.dsets = {{Type::LONG, Size::FIX, "bond_dimensions", ""},
+                     {Type::DOUBLE, Size::FIX, "entanglement_entropies", ""},
+                     {Type::DOUBLE, Size::FIX, "number_entropies", ""},
+                     {Type::DOUBLE, Size::FIX, "truncation_errors", ""},
+                     {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
+            keys.bonds = DsetKey{Type::COMPLEX, Size::VAR, "L_", ""};
+            break;
+        }
+        default: throw std::runtime_error("Invalid model");
     }
 
 
 
 
-    // Open the target file
 
+    // Open the target file
     h5pp::File h5_tgt(tgt_path, h5pp::FilePermission::READWRITE, verbosity_h5pp);
     //    h5_tgt.setDriver_core();
     h5_tgt.setCompressionLevel(3);
@@ -172,10 +181,11 @@ int main(int argc, char *argv[]) {
         h5_tgt.writeDataset(GIT::REVISION, "git/h5mbl/revision");
     }
 
-    auto tgtFileDb  = tools::h5db::loadFileDatabase(h5_tgt); // This database maps  src_name <--> FileId
-    auto tgtModelDb = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, models);
-    auto tgtTableDb = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, tables);
-    auto tgtDsetDb  = tools::h5db::loadDatabase<h5pp::DsetInfo>(h5_tgt, dsets);
+    tools::h5db::TgtDb tgtdb;
+    tgtdb.file  = tools::h5db::loadFileDatabase(h5_tgt); // This database maps  src_name <--> FileId
+    tgtdb.model = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.models);
+    tgtdb.table = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.tables);
+    tgtdb.dset  = tools::h5db::loadDatabase<h5pp::DsetInfo>(h5_tgt,  keys.dsets);
 
     tools::prof::t_tot.tic();
     //    size_t                                  num_files = 0;
@@ -200,35 +210,6 @@ int main(int argc, char *argv[]) {
             tools::prof::t_itr.toc();
             continue;
         }
-
-        //        if(src_abs.string().find("L_20") != std::string::npos) {
-        //            tools::prof::t_itr.toc();
-        //            continue;
-        //        }
-        //        if(src_abs.string().find("l_0.0000") != std::string::npos) {
-        //            tools::prof::t_itr.toc();
-        //            continue;
-        //        }
-        //        if(src_abs.string().find("l_0.0050") != std::string::npos) {
-        //            tools::prof::t_itr.toc();
-        //            continue;
-        //        }
-        //        if(src_abs.string().find("l_0.0100") != std::string::npos) {
-        //            tools::prof::t_itr.toc();
-        //            continue;
-        //        }
-        //        if(src_abs.string().find("l_0.0150") != std::string::npos) {
-        //            tools::prof::t_itr.toc();
-        //            continue;
-        //        }
-        //        if(src_abs.string().find("d_0.0488") != std::string::npos) {
-        //            tools::prof::t_itr.toc();
-        //            continue;
-        //        }
-        //        if(src_abs.string().find("d_+0.0500") != std::string::npos) {
-        //            tools::prof::t_itr.toc();
-        //            continue;
-        //        }
 
         tools::prof::t_itr.toc();
         tools::prof::t_pre.tic();
@@ -278,9 +259,9 @@ int main(int argc, char *argv[]) {
         FileId fileId(src_seed, src_abs.string(), src_hash);
 
         // We check if it's in the file database
-        auto status = tools::h5db::getFileIdStatus(tgtFileDb, fileId);
+        auto status = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
         tools::logger::log->info("Found file: {} | {} | {}", src_rel.string(), enum2str(status), src_hash);
-        tgtFileDb[fileId.path] = fileId;
+        tgtdb.file[fileId.path] = fileId;
         tools::prof::t_hsh.toc();
         if(status == FileIdStatus::UPTODATE) {
             if(tools::prof::t_pre.is_measuring) tools::prof::t_pre.toc();
@@ -318,80 +299,20 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-
         // Define reusable source Info
-        static std::unordered_map<std::string, h5pp::TableInfo> srcTableDb;
-        static std::unordered_map<std::string, h5pp::DsetInfo>  srcDsetDb;
-        static std::unordered_map<std::string, ModelId<ModelT>> srcModelDb;
+        static tools::h5db::SrcDb<ModelId<sdual>> srcDb_sdual;
+        static tools::h5db::SrcDb<ModelId<lbit>> srcDb_lbit;
 
-        // Start finding the required components in the source
-        h5_src.setKeepFileOpened();
-        tools::prof::t_gr1.tic();
-        auto groups = tools::h5io::findKeys(h5_src, "/", algo_keys, -1, 0);
-        //        groups = h5_src.findLinks(algo_key, "/", -1, 0);
-        tools::prof::t_gr1.toc();
-
-        for(const auto &algo : groups) {
-            auto  modelKey = tools::h5io::loadModel(h5_src, srcModelDb, algo);
-            auto &modelId  = srcModelDb.at(modelKey);
-            auto  tgt_base = tools::h5io::get_standardized_base(modelId);
-
-            // Start by storing the model if it hasn't already been
-            tools::h5io::saveModel(h5_src, h5_tgt, tgtModelDb, modelId);
-
-            // Next search for tables and datasets in the source file
-            // and transfer them to the target file
-
-            tools::prof::t_gr2.tic();
-            auto state_groups = tools::h5io::findKeys(h5_src, algo, state_keys, -1, 0);
-            tools::prof::t_gr2.toc();
-            for(const auto &state : state_groups) {
-                tools::prof::t_gr3.tic();
-                auto point_groups = tools::h5io::findKeys(h5_src, fmt::format("{}/{}", algo, state), point_keys, -1, 1);
-                tools::prof::t_gr3.toc();
-                for(const auto &point : point_groups) {
-                    auto srcGroupPath = fmt::format("{}/{}/{}", algo, state, point);
-                    auto tgtGroupPath = fmt::format("{}/{}/{}/{}", tgt_base, algo, state, point);
-                    // Try gathering all the tables
-                    try {
-                        auto dsetKeys = tools::h5io::gatherDsetKeys(h5_src, srcDsetDb, srcGroupPath, dsets);
-                        tools::h5io::transferDatasets(h5_tgt, tgtDsetDb, h5_src, srcDsetDb, tgtGroupPath, dsetKeys, fileId);
-                    } catch(const std::runtime_error &ex) { tools::logger::log->warn("Dset transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
-
-                    try {
-                        auto tableKeys = tools::h5io::gatherTableKeys(h5_src, srcTableDb, srcGroupPath, tables);
-                        tools::h5io::transferTables(h5_tgt, tgtTableDb, srcTableDb, tgtGroupPath, tableKeys, fileId);
-                    } catch(const std::runtime_error &ex) { tools::logger::log->error("Table transfer failed in [{}]: {}", srcGroupPath, ex.what()); }
-
-                    try {
-                        auto cronoKeys = tools::h5io::gatherTableKeys(h5_src, srcTableDb, srcGroupPath, cronos);
-                        tools::h5io::transferCronos(h5_tgt, tgtTableDb, srcTableDb, tgtGroupPath, cronoKeys, fileId);
-                    } catch(const std::runtime_error &ex) { tools::logger::log->error("Crono transfer failed in[{}]: {}", srcGroupPath, ex.what()); }
-                }
+        switch(model){
+            case Model::SDUAL: {
+                tools::h5io::merge(h5_tgt, h5_src, fileId, keys, tgtdb,srcDb_sdual);
+                break;
+            }
+            case Model::LBIT: {
+                tools::h5io::merge(h5_tgt, h5_src, fileId, keys, tgtdb,srcDb_lbit);
+                break;
             }
         }
-
-        auto ssize_objids = H5Fget_obj_count(h5_src.openFileHandle(), H5F_OBJ_DATASET | H5F_OBJ_GROUP | H5F_OBJ_ATTR);
-        if(ssize_objids > 0) {
-            auto               size_objids = static_cast<size_t>(ssize_objids);
-            std::vector<hid_t> objids(size_objids);
-            H5Fget_obj_ids(h5_src.openFileHandle(), H5F_OBJ_ALL, size_objids, objids.data());
-            tools::logger::log->warn("File [{}] has {} open ids: {}", h5_src.getFilePath(), size_objids, objids);
-            for(auto &id : objids) tools::logger::log->info("{}",tools::h5dbg::get_hid_string_details(id));
-            throw std::logic_error(fmt::format("File [{}] has {} open ids: {}", h5_src.getFilePath(), size_objids, objids));
-        } else if(ssize_objids < 0) {
-            tools::logger::log->error("File [{}] failed to count ids: {}", h5_src.getFilePath(), ssize_objids);
-        }
-
-        h5_src.setKeepFileClosed(); // This closes the permanent file-handle
-
-        // Check that there are no errors hiding in the HDF5 error-stack
-        auto num_errors = H5Eget_num(H5E_DEFAULT);
-        if(num_errors > 0) {
-            H5Eprint(H5E_DEFAULT, stderr);
-            throw std::runtime_error(fmt::format("Error when treating file [{}]", h5_src.getFilePath()));
-        }
-        H5Eprint(H5E_DEFAULT, stderr);
     }
 
     // TODO: Put the lines below in a "at quick exit" function
@@ -399,14 +320,14 @@ int main(int argc, char *argv[]) {
     tools::prof::append();
     tools::h5io::writeProfiling(h5_tgt);
 
-    tools::h5db::saveDatabase(h5_tgt, tgtFileDb);
-    tools::h5db::saveDatabase(h5_tgt, tgtModelDb);
-    tools::h5db::saveDatabase(h5_tgt, tgtTableDb);
-    tools::h5db::saveDatabase(h5_tgt, tgtDsetDb);
-    tgtFileDb.clear();
-    tgtModelDb.clear();
-    tgtTableDb.clear();
-    tgtDsetDb.clear();
+    tools::h5db::saveDatabase(h5_tgt, tgtdb.file);
+    tools::h5db::saveDatabase(h5_tgt, tgtdb.model);
+    tools::h5db::saveDatabase(h5_tgt, tgtdb.table);
+    tools::h5db::saveDatabase(h5_tgt, tgtdb.dset);
+    tgtdb.file.clear();
+    tgtdb.model.clear();
+    tgtdb.table.clear();
+    tgtdb.dset.clear();
 
     auto ssize_objids = H5Fget_obj_count(h5_tgt.openFileHandle(), H5F_OBJ_ALL);
     if(ssize_objids > 0) {
@@ -449,3 +370,4 @@ int main(int argc, char *argv[]) {
     tools::logger::log->info("{}: {:.5f}", tools::prof::t_tot.get_name(), tools::prof::t_tot.get_measured_time());
     tools::logger::log->info("Results written to file {}", tgt_path.string());
 }
+
