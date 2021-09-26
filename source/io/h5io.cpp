@@ -16,8 +16,12 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <cstdlib>
 
 namespace tools::h5io {
+
+    std::string get_tmp_dirname(std::string_view exename) { return fmt::format("{}.{}", exename,getenv("USER")); }
+
     namespace internal {
         template<typename T>
         void append_dset(h5pp::File &h5_tgt, const h5pp::File &h5_src, h5pp::DsetInfo &tgtInfo, h5pp::DsetInfo &srcInfo) {

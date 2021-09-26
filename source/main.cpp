@@ -31,6 +31,7 @@ Usage                       : ./cpp_merger [-option <value>].
 -r                          : Replace target file if one exists (truncate)
 -s <src_dir>                : Root directory for the output files. Supports pattern matching for relative paths.
 -t <tgt_dir>                : Target directory for the single output file
+-D                          : Write to destination directly, without using /tmp path
 -v <level>                  : Enables verbosity. Default level 2 (0 is max verbosity)
 -V <level>                  : Enables trace-level verbosity of h5pp. Default level 2 (0 is max verbosity)
 )");
@@ -67,7 +68,9 @@ int main(int argc, char *argv[]) {
     std::string                 src_out  = "output";
     std::string                 tgt_file = "merged.h5";
     h5pp::fs::path              tgt_dir;
+    h5pp::fs::path              tmp_dir        = fmt::format("/tmp/{}", tools::h5io::get_tmp_dirname(argv[0]));
     bool                        finished       = false;
+    bool                        skip_tmp       = false;
     size_t                      verbosity      = 2;
     size_t                      verbosity_h5pp = 2;
     size_t                      max_files      = std::numeric_limits<size_t>::max();
@@ -78,7 +81,7 @@ int main(int argc, char *argv[]) {
     bool                        replace        = false;
 
     while(true) {
-        char opt = static_cast<char>(getopt(argc, argv, "hb:fm:M:n:o:rs:t:v:V:"));
+        char opt = static_cast<char>(getopt(argc, argv, "hb:Dfm:M:n:o:rs:t:v:V:"));
         if(opt == EOF) break;
         if(optarg == nullptr)
             tools::logger::log->info("Parsing input argument: -{}", opt);
@@ -87,6 +90,7 @@ int main(int argc, char *argv[]) {
         switch(opt) {
             case 'b': default_base = h5pp::fs::canonical(optarg); continue;
             case 'f': finished = true; continue;
+            case 'D': skip_tmp = true; continue;
             case 'm': max_files = std::strtoul(optarg, nullptr, 10); continue;
             case 'M': model = str2enum<Model>(std::string_view(optarg)); continue;
             case 'n': tgt_file = std::string(optarg); continue;
@@ -168,11 +172,10 @@ int main(int argc, char *argv[]) {
             keys.tables.emplace_back(TableKey("fLBIT", "state_*", "tables", "mem_usage"));
             // A crono records data from each time step
             keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "measurements"));
-            keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "bond_dimensions")); // Available in v2
-            keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "entanglement_entropies"));  // Available in v2
-            keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "number_entropies"));  // Available in v2
-            keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "truncation_errors"));  // Available in v2
-
+            keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "bond_dimensions"));        // Available in v2
+            keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "entanglement_entropies")); // Available in v2
+            keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "number_entropies"));       // Available in v2
+            keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "truncation_errors"));      // Available in v2
 
             //            keys.dsets.emplace_back(DsetKey("fLBIT", "state_*", "finished", "schmidt_midchain", Size::VAR, Type::COMPLEX));
             //            keys.dsets.emplace_back(DsetKey("fLBIT", "state_*", "finished/profiling", "fLBIT.run", Size::FIX, Type::TID));
@@ -184,8 +187,13 @@ int main(int argc, char *argv[]) {
     // Open the target file
     auto perm = h5pp::FilePermission::READWRITE;
     if(replace) perm = h5pp::FilePermission::REPLACE;
+    std::string tmp_path;
+    if(skip_tmp)
+        tmp_path = tgt_path;
+    else
+        tgt_path = fmt::format("{}/{}", tmp_dir, tgt_file);
 
-    h5pp::File h5_tgt(tgt_path, perm, verbosity_h5pp);
+    h5pp::File h5_tgt(tmp_path, perm, verbosity_h5pp);
     //    h5_tgt.setDriver_core();
     //    h5_tgt.setKeepFileOpened();
     h5_tgt.setCompressionLevel(3);
@@ -249,8 +257,8 @@ int main(int argc, char *argv[]) {
                 break;
             else
                 file_counter[src_base] = 0;
-        } else if(file_counter[src_base] >= max_files){
-            tools::logger::log->debug("Max files reached in {}: {}",src_base, file_counter[src_base] );
+        } else if(file_counter[src_base] >= max_files) {
+            tools::logger::log->debug("Max files reached in {}: {}", src_base, file_counter[src_base]);
             continue;
         }
 
@@ -271,7 +279,7 @@ int main(int argc, char *argv[]) {
 
         // We check if it's in the file database
         auto status = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
-        tools::logger::log->info("Found file: {} | {} | {} | count {}", src_rel.string(), enum2str(status), src_hash,file_counter[src_base]);
+        tools::logger::log->info("Found file: {} | {} | {} | count {}", src_rel.string(), enum2str(status), src_hash, file_counter[src_base]);
         tgtdb.file[fileId.path] = fileId;
         if(status == FileIdStatus::UPTODATE) continue;
 
@@ -408,6 +416,8 @@ int main(int argc, char *argv[]) {
         H5Eprint(H5E_DEFAULT, stderr);
         throw std::runtime_error(fmt::format("Error when treating file [{}]", h5_tgt.getFilePath()));
     }
+    if(not skip_tmp)
+        h5_tgt.moveFileTo(tgt_path, h5pp::FilePermission::REPLACE);
 
     tools::logger::log->info("-- Open  file: {:>8.3f} s", tools::prof::t_opn.get_measured_time());
     tools::logger::log->info("-- Close file: {:>8.3f} s", tools::prof::t_clo.get_measured_time());
