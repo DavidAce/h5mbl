@@ -22,6 +22,7 @@ namespace tools::prof {
     inline class_tic_toc                     t_dat = class_tic_toc(true, 5, "Database time");
     inline class_tic_toc                     t_hsh = class_tic_toc(true, 5, "Hash     time");
     inline class_tic_toc                     t_fnd = class_tic_toc(true, 5, "Find     time");
+    inline class_tic_toc                     t_spd = class_tic_toc(true, 5, "Speed    time");
 
     inline class_tic_toc                     t_opn = class_tic_toc(true, 5, "Open file");
     inline class_tic_toc                     t_mrg = class_tic_toc(true, 5, "Merge file");

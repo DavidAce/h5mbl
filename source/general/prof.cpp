@@ -18,6 +18,7 @@ namespace tools::prof {
         tools::prof::t_crt = class_tic_toc(true, 5, "Create   time");
         tools::prof::t_ham = class_tic_toc(true, 5, "Model    time");
         tools::prof::t_dat = class_tic_toc(true, 5, "Database time");
+        tools::prof::t_spd = class_tic_toc(true, 5, "Speed    time");
     }
 
     void append() {

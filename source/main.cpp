@@ -4,6 +4,7 @@
 #include <general/enums.h>
 #include <general/prof.h>
 #include <general/settings.h>
+#include <general/human.h>
 #include <getopt.h>
 #include <gitversion.h>
 #include <h5pp/h5pp.h>
@@ -80,6 +81,7 @@ int main(int argc, char *argv[]) {
 
     tools::prof::init();
     auto                        t_tot_token  = tools::prof::t_tot.tic_token();
+    auto                        t_spd_token  = tools::prof::t_spd.tic_token();
     h5pp::fs::path              default_base = h5pp::fs::absolute("/mnt/Barracuda/Projects/mbl_transition");
     std::vector<h5pp::fs::path> src_dirs;
     std::string                 src_out  = "output";
@@ -240,14 +242,14 @@ int main(int argc, char *argv[]) {
     //    h5_tgt.setDriver_sec2();
 
     //    size_t                                  num_files = 0;
-    std::unordered_map<std::string, size_t> file_counter;
+    uintmax_t totalbytes = 0;
+    std::unordered_map<std::string, FileStats> file_stats;
     using reciter = h5pp::fs::recursive_directory_iterator;
     std::vector<h5pp::fs::path> recfiles;
     for(auto &src_dir : src_dirs) { copy(reciter(src_dir), reciter(), back_inserter(recfiles)); }
     std::sort(recfiles.begin(), recfiles.end());
     for(const auto &src_item : recfiles) {
         auto t_itr_token = tools::prof::t_itr.tic_token();
-
         const auto &src_abs = src_item;
         if(not src_abs.has_filename()) continue;
         if(src_abs.extension() != ".h5") continue;
@@ -272,14 +274,14 @@ int main(int argc, char *argv[]) {
         auto src_rel  = h5pp::fs::relative(src_abs, src_dir);
         auto src_base = src_rel.parent_path();
 
-        bool counter_exists = file_counter.find(src_base) != file_counter.end();
-        if(not counter_exists) {
-            if(file_counter.size() >= max_dirs)
+        bool stats_exists = file_stats.find(src_base) != file_stats.end();
+        if(not stats_exists) {
+            if(file_stats.size() >= max_dirs)
                 break;
             else
-                file_counter[src_base] = 0;
-        } else if(file_counter[src_base] >= max_files) {
-            tools::logger::log->debug("Max files reached in {}: {}", src_base, file_counter[src_base]);
+                file_stats[src_base].count = 0;
+        } else if(file_stats[src_base].count >= max_files) {
+            tools::logger::log->debug("Max files reached in {}: {}", src_base, file_stats[src_base].count);
             continue;
         }
 
@@ -300,7 +302,13 @@ int main(int argc, char *argv[]) {
 
         // We check if it's in the file database
         auto status = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
-        tools::logger::log->info("Found file: {} | {} | {} | count {}", src_rel.string(), enum2str(status), src_hash, file_counter[src_base]);
+        auto fmt_group_bytes = tools::fmtBytes(true, file_stats[src_base].bytes,1024,1);
+        auto fmt_total_bytes = tools::fmtBytes(true, file_stats[src_base].bytes,1024,1);
+        auto fmt_speed_bytes = tools::fmtBytes(true, file_stats[src_base].get_speed(),1024,1);
+        tools::logger::log->info("Found file: {} | {} | {} | count {} | group {} | total {} | {}/s", src_rel.string(), enum2str(status), src_hash, file_stats[src_base].count,
+                                 fmt_group_bytes,
+                                 fmt_total_bytes,
+                                 fmt_speed_bytes);
         tgtdb.file[fileId.path] = fileId;
         if(status == FileIdStatus::UPTODATE) continue;
 
@@ -332,7 +340,12 @@ int main(int argc, char *argv[]) {
             tools::logger::log->warn("Skipping file: {}\n\tReason: {}", src_abs.string(), ex.what());
             continue;
         }
-        file_counter[src_base]++;
+        if(file_stats[src_base].count == 0)
+            tools::prof::t_spd.reset();
+        file_stats[src_base].count++;
+        file_stats[src_base].bytes += h5pp::fs::file_size(h5_src.getFilePath());
+        file_stats[src_base].elaps += tools::prof::t_spd.restart_lap();
+        totalbytes +=h5pp::fs::file_size(h5_src.getFilePath());
 
         t_opn_token.toc();
 

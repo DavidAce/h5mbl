@@ -26,6 +26,7 @@ add_executable(${PROJECT_NAME}
         source/general/prof.cpp
         source/general/text.cpp
         source/general/class_tic_toc.cpp
+        source/general/human.cpp
         source/debug/stacktrace.cpp
         )
 target_include_directories(${PROJECT_NAME} PRIVATE source)

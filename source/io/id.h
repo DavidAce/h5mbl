@@ -6,6 +6,18 @@
 #include <string_view>
 #include <unordered_map>
 
+struct FileStats {
+    size_t    count = 0;
+    uintmax_t bytes = 0;
+    double    elaps = 0.0;
+    size_t    get_speed() const {
+        if(elaps == 0)
+            return 0;
+        else
+            return static_cast<size_t>(static_cast<double>(bytes) / elaps);
+    }
+};
+
 struct FileId {
     long seed      = -1;
     char path[256] = {};
@@ -50,10 +62,11 @@ struct PathId {
     std::string src_path, tgt_path;
     std::string base, algo, state, point;
     PathId(std::string_view base_, std::string_view algo_, std::string_view state_, std::string_view point_);
-    [[nodiscard]] bool match(std::string_view algo_pattern, std::string_view state_pattern, std::string_view point_pattern) const;
+    [[nodiscard]] bool        match(std::string_view algo_pattern, std::string_view state_pattern, std::string_view point_pattern) const;
     [[nodiscard]] std::string dset_path(std::string_view dsetname) const;
     [[nodiscard]] std::string table_path(std::string_view tablename) const;
     [[nodiscard]] std::string crono_path(std::string_view tablename, size_t iter) const;
+
     private:
     static bool match(std::string_view comp, std::string_view pattern);
 };
