@@ -19,7 +19,8 @@
 #include <cstdlib>
 
 namespace tools::h5io {
-    std::string get_tmp_dirname(std::string_view exename) { return fmt::format("{}.{}", exename,getenv("USER")); }
+    std::string get_tmp_dirname(std::string_view exename) {
+        return fmt::format("{}.{}", h5pp::fs::path(exename).filename().string(),getenv("USER")); }
 
     namespace internal {
         template<typename T>

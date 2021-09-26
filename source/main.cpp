@@ -80,7 +80,7 @@ int main(int argc, char *argv[]) {
     std::string                 src_out  = "output";
     std::string                 tgt_file = "merged.h5";
     h5pp::fs::path              tgt_dir;
-    h5pp::fs::path              tmp_dir        = fmt::format("/tmp/{}", tools::h5io::get_tmp_dirname(argv[0]));
+    h5pp::fs::path              tmp_dir        = h5pp::fs::absolute(fmt::format("/tmp/{}", tools::h5io::get_tmp_dirname(argv[0])));
     bool                        finished       = false;
     bool                        skip_tmp       = false;
     size_t                      verbosity      = 2;
@@ -204,9 +204,9 @@ int main(int argc, char *argv[]) {
     if(replace) perm = h5pp::FilePermission::REPLACE;
     h5pp::File h5_tgt(tgt_path, perm, verbosity_h5pp);
     if(not skip_tmp) {
-        tools::h5io::tmp_path = fmt::format("{}/{}", tmp_dir, tgt_file);
-        tools::h5io::tgt_path = tgt_path;
-        tools::logger::log->info("Moving to {}", tgt_path);
+        tools::h5io::tmp_path = (tmp_dir/tgt_file).string();
+        tools::h5io::tgt_path = tgt_path.string();
+        tools::logger::log->info("Moving to {} -> {}",tools::h5io::tgt_path, tools::h5io::tmp_path);
         h5_tgt.moveFileTo(tools::h5io::tmp_path, h5pp::FilePermission::REPLACE);
         std::at_quick_exit(clean_up);
         std::atexit(clean_up);
