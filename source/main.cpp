@@ -203,8 +203,8 @@ int main(int argc, char *argv[]) {
         tools::h5io::tgt_path = tgt_path.string();
         tools::logger::log->info("Moving to {} -> {}", tools::h5io::tgt_path, tools::h5io::tmp_path);
         h5_tgt.moveFileTo(tools::h5io::tmp_path, h5pp::FilePermission::REPLACE);
-        std::at_quick_exit(clean_up);
         std::atexit(clean_up);
+        std::at_quick_exit(clean_up);
     }
 
     //    h5_tgt.setDriver_core();
@@ -467,5 +467,9 @@ int main(int argc, char *argv[]) {
     tools::logger::log->info("-- ch4       : {:>8.3f} s", tools::prof::t_ch4.get_measured_time());
     tools::logger::log->info("-- Total     : {:>8.3f} s", tools::prof::t_tot.get_measured_time());
     tools::logger::log->info("{}: {:.5f}", tools::prof::t_tot.get_name(), tools::prof::t_tot.get_measured_time());
+
+    if(not skip_tmp)
+        h5_tgt.moveFileTo(tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
+
     tools::logger::log->info("Results written to file {}", tgt_path.string());
 }
