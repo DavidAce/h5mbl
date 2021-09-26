@@ -137,7 +137,7 @@ int main(int argc, char *argv[]) {
     tools::logger::setLogLevel(tools::logger::log, verbosity);
     tools::logger::log->info("Started h5mbl from directory {}", h5pp::fs::current_path());
     if(src_dirs.empty()) {
-        src_dirs.emplace_back(h5pp::fs::canonical(fmt::format("{}/{}",default_base, src_out)));
+        src_dirs.emplace_back(h5pp::fs::canonical(default_base / src_out));
     }
     if(src_dirs.empty()) throw std::runtime_error("Source directories are required. Pass -s <dirpath> (one or more times)");
     for(auto &src_dir : src_dirs) {
