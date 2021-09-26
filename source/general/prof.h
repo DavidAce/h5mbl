@@ -63,4 +63,4 @@ namespace tools::prof {
     extern double mem_hwm_in_mb();
     extern double mem_vm_in_mb();
 
-};
+}
