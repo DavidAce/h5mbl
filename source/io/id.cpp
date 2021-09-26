@@ -2,8 +2,14 @@
 #include <h5pp/details/h5ppInfo.h>
 
 FileId::FileId(long seed_, std::string_view path_, std::string_view hash_) : seed(seed_) {
-    strncpy(path, path_.data(), 256);
-    strncpy(hash, hash_.data(), 32);
+    strncpy(path, path_.data(), sizeof(path));
+    strncpy(hash, hash_.data(), sizeof(hash));
+
+    /* Theses lines are extremely important to make sure we don't get UB */
+    path[sizeof(path)-1] = '\0';
+    hash[sizeof(hash)-1] = '\0';
+
+
 }
 std::string FileId::string() const { return h5pp::format("path [{}] | seed {} | hash {}", path, seed, hash); }
 
