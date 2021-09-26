@@ -55,6 +55,18 @@ double compute_renyi(const std::vector<std::complex<double>> &S, double q) {
     return std::real(renyi_q(0));
 }
 
+
+void clean_up() {
+    if(not tools::h5io::tmp_path.empty() and h5pp::fs::exists(tools::h5io::tmp_path)) {
+        try {
+        tools::logger::log->info("Cleaning up temporary file: [{}]", tools::h5io::tmp_path);
+            h5pp::hdf5::moveFile(tools::h5io::tmp_path, tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
+        } catch(const std::exception &err) { tools::logger::log->info("Cleaning not needed: {}", err.what()); }
+    }
+    H5garbage_collect();
+    H5Eprint(H5E_DEFAULT, stderr);
+}
+
 int main(int argc, char *argv[]) {
     // Here we use getopt to parse CLI input
     // Note that CLI input always override config-file values
@@ -187,13 +199,16 @@ int main(int argc, char *argv[]) {
     // Open the target file
     auto perm = h5pp::FilePermission::READWRITE;
     if(replace) perm = h5pp::FilePermission::REPLACE;
-    std::string tmp_path;
-    if(skip_tmp)
-        tmp_path = tgt_path;
-    else
-        tgt_path = fmt::format("{}/{}", tmp_dir, tgt_file);
+    h5pp::File h5_tgt(tgt_path, perm, verbosity_h5pp);
+    if(not skip_tmp) {
+        tools::h5io::tmp_path = fmt::format("{}/{}", tmp_dir, tgt_file);
+        tools::h5io::tgt_path = tgt_path;
+        h5_tgt.moveFileTo(tools::h5io::tmp_path, h5pp::FilePermission::REPLACE);
+        std::at_quick_exit(clean_up);
+        std::atexit(clean_up);
+    }
 
-    h5pp::File h5_tgt(tmp_path, perm, verbosity_h5pp);
+
     //    h5_tgt.setDriver_core();
     //    h5_tgt.setKeepFileOpened();
     h5_tgt.setCompressionLevel(3);
@@ -416,8 +431,6 @@ int main(int argc, char *argv[]) {
         H5Eprint(H5E_DEFAULT, stderr);
         throw std::runtime_error(fmt::format("Error when treating file [{}]", h5_tgt.getFilePath()));
     }
-    if(not skip_tmp)
-        h5_tgt.moveFileTo(tgt_path, h5pp::FilePermission::REPLACE);
 
     tools::logger::log->info("-- Open  file: {:>8.3f} s", tools::prof::t_opn.get_measured_time());
     tools::logger::log->info("-- Close file: {:>8.3f} s", tools::prof::t_clo.get_measured_time());
