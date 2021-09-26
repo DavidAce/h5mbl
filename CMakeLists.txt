@@ -114,20 +114,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${CONAN_TARGETS})
 
 
 # Print summary of CMake configuration
-if (H5MBL_PRINT_INFO)
-    include(cmake/PrintTargetInfo.cmake)
-    include(cmake/getExpandedTarget.cmake)
-    foreach (tgt ${CONAN_TARGETS})
-        expand_target_all_targets(${tgt} expanded_target)
-        list(APPEND H5MBL_TARGETS_EXPANDED ${expanded_target})
-    endforeach ()
-    list(REMOVE_DUPLICATES H5MBL_TARGETS_EXPANDED)
-    message(STATUS "| H5MBL TARGET SUMMARY")
-    message(STATUS "|--------------------")
-    foreach (tgt ${H5MBL_TARGETS_EXPANDED})
-        print_target_info(${tgt} "| ")
-    endforeach ()
-endif ()
+include(cmake/PrintTargetInfo.cmake)
+print_project_summary(h5mbl)
 
 
 
