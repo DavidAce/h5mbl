@@ -206,6 +206,7 @@ int main(int argc, char *argv[]) {
     if(not skip_tmp) {
         tools::h5io::tmp_path = fmt::format("{}/{}", tmp_dir, tgt_file);
         tools::h5io::tgt_path = tgt_path;
+        tools::logger::log->info("Moving to {}", tgt_path);
         h5_tgt.moveFileTo(tools::h5io::tmp_path, h5pp::FilePermission::REPLACE);
         std::at_quick_exit(clean_up);
         std::atexit(clean_up);
