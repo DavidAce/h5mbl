@@ -19,7 +19,7 @@
 void print_usage() {
     std::printf(
         R"(
-==========  cpp_merger  ============
+==========  h5mbl  ============
 Usage                       : ./cpp_merger [-option <value>].
 -h                          : Help. Shows this text.
 -b <base_dir>               : Default base directory (default /mnt/Barracuda/Projects/mbl_transition)
