@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
     tools::logger::log = tools::logger::setLogger("h5mbl", 2);
     tools::prof::init();
     auto                        t_tot_token  = tools::prof::t_tot.tic_token();
-    h5pp::fs::path              default_base = h5pp::fs::canonical("/mnt/Barracuda/Projects/mbl_transition");
+    h5pp::fs::path              default_base = h5pp::fs::absolute("/mnt/Barracuda/Projects/mbl_transition");
     std::vector<h5pp::fs::path> src_dirs;
     std::string                 src_out  = "output";
     std::string                 tgt_file = "merged.h5";
