@@ -62,7 +62,14 @@ double class_tic_toc::get_measured_time() const {
         return std::chrono::duration_cast<std::chrono::duration<double>>(measured_time).count();
 }
 
-double class_tic_toc::get_last_interval() const { return std::chrono::duration_cast<std::chrono::duration<double>>(delta_time).count(); }
+double class_tic_toc::get_last_interval() const {
+
+    if(is_measuring){
+        auto delta_temp  = std::chrono::high_resolution_clock::now() - tic_timepoint;
+        return std::chrono::duration_cast<std::chrono::duration<double>>(delta_temp).count();
+    }else
+        return std::chrono::duration_cast<std::chrono::duration<double>>(delta_time).count();
+}
 
 double class_tic_toc::get_lap() const {
     if(is_measuring) {
@@ -77,7 +84,7 @@ double class_tic_toc::get_lap() const {
 }
 
 double class_tic_toc::restart_lap() {
-    double lap = std::chrono::duration_cast<std::chrono::duration<double>>(lap_time).count();
+    double lap = get_lap();
     start_lap();
     return lap;
 }
@@ -137,7 +144,7 @@ class_tic_toc &class_tic_toc::operator-=(const class_tic_toc &rhs) {
 
 
 class_tic_toc::token::token(class_tic_toc &t_) :t(t_){
-    if(not t.is_measuring) t.tic();
+    t.tic();
 }
 
 class_tic_toc::token::~token() noexcept {

@@ -1,7 +1,7 @@
 #pragma once
 #include <h5pp/details/h5ppInfo.h>
-#include <io/id.h>
 #include <io/h5db.h>
+#include <io/id.h>
 #include <io/meta.h>
 #include <string>
 #include <unordered_map>
@@ -18,36 +18,33 @@ namespace tools::h5io {
                                       long depth = 0);
 
     template<typename T>
-    std::string loadModel(const h5pp::File &h5_src, std::unordered_map<std::string, ModelId<T>> &srcModelDb, const std::string &algo);
+    std::vector<ModelKey> loadModel(const h5pp::File &h5_src, std::unordered_map<std::string, ModelId<T>> &srcModelDb, const std::vector<ModelKey> &srcKeys);
 
     template<typename T>
     void saveModel(const h5pp::File &h5_src, h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
                    const ModelId<T> &modelId);
 
-    std::vector<std::string> gatherTableKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb,
-                                             const std::string &groupPath, const std::vector<std::string> &tables);
-
-    std::vector<DsetKey> gatherDsetKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const std::string &groupPath,
-                                        const std::vector<DsetKey> &srcDsetMetas);
+    std::vector<DsetKey>  gatherDsetKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const PathId &pathid,
+                                         const std::vector<DsetKey> &srcKeys);
+    std::vector<TableKey> gatherTableKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid,
+                                          const std::vector<TableKey> &tables);
+    std::vector<CronoKey> gatherCronoKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid,
+                                          const std::vector<CronoKey> &cronos);
 
     void transferDatasets(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::DsetInfo>> &tgtDsetDb, const h5pp::File &h5_src,
-                          std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const std::string &groupPath, const std::vector<DsetKey> &srcDsetKeys,
+                          std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const PathId &pathid, const std::vector<DsetKey> &srcDsetKeys,
                           const FileId &fileId);
 
     void transferTables(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
-                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const std::string &groupPath,
-                        const std::vector<std::string> &srcTableKeys, const FileId &fileId);
+                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid, const std::vector<std::string> &srcTableKeys,
+                        const FileId &fileId);
 
     void transferCronos(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
-                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const std::string &groupPath,
-                        const std::vector<std::string> &srcTableKeys, const FileId &fileId);
-
-
+                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid, const std::vector<std::string> &srcCronoKeys,
+                        const FileId &fileId);
 
     template<typename ModelType>
-    void merge(h5pp::File & h5_tgt, const h5pp::File & h5_src, const FileId & fileId, const tools::h5db::Keys & keys, tools::h5db::TgtDb & tgtdb, tools::h5db::SrcDb<ModelType> & srcdb );
-
-
+    void merge(h5pp::File &h5_tgt, const h5pp::File &h5_src, const FileId &fileId, const tools::h5db::Keys &keys, tools::h5db::TgtDb &tgtdb);
 
     void writeProfiling(h5pp::File &h5_tgt);
 

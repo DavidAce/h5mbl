@@ -1,4 +1,5 @@
 #pragma once
+#include <general/text.h>
 #include <h5pp/details/h5ppFormat.h>
 #include <h5pp/details/h5ppHid.h>
 #include <string>
@@ -18,6 +19,7 @@ struct lbit {
     double J1_mean, J2_mean, J3_mean;
     double J1_wdth, J2_wdth, J3_wdth;
     double J2_base;
+    size_t J2_span;
     double f_mixer;
     size_t u_layer;
 };
@@ -40,22 +42,21 @@ struct ModelId {
     std::string algorithm;
     std::string key;
     std::string path;
+    std::string basepath;
 };
 
-// struct ModelId {
-//    size_t      model_size;
-//    double      J_mean;
-//    double      J_stdv;
-//    double      h_mean;
-//    double      h_stdv;
-//    double      lambda;
-//    double      delta;
-//    std::string model_type;
-//    std::string distribution;
-//    std::string algorithm;
-//    std::string key;
-//    std::string path;
-//};
+struct PathId {
+    public:
+    std::string src_path, tgt_path;
+    std::string base, algo, state, point;
+    PathId(std::string_view base_, std::string_view algo_, std::string_view state_, std::string_view point_);
+    [[nodiscard]] bool match(std::string_view algo_pattern, std::string_view state_pattern, std::string_view point_pattern) const;
+    [[nodiscard]] std::string dset_path(std::string_view dsetname) const;
+    [[nodiscard]] std::string table_path(std::string_view tablename) const;
+    [[nodiscard]] std::string crono_path(std::string_view tablename, size_t iter) const;
+    private:
+    static bool match(std::string_view comp, std::string_view pattern);
+};
 
 template<typename InfoType>
 struct InfoId {

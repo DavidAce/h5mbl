@@ -12,78 +12,65 @@
 namespace tools::h5db {
 
     std::unordered_map<std::string, FileId> loadFileDatabase(const h5pp::File &h5_tgt) {
-        tools::prof::t_dat.tic();
+        auto t_dat_token = tools::prof::t_dat.tic_token();
         std::unordered_map<std::string, FileId> fileDatabase;
         if(h5_tgt.linkExists(".db/files")) {
             tools::logger::log->info("Loading database files");
             auto database = h5_tgt.readTableRecords<std::vector<FileId>>(".db/files");
             for(auto &item : database) fileDatabase[item.path] = item;
         }
-        tools::prof::t_dat.toc();
         return fileDatabase;
     }
 
-    template<typename InfoType, typename MetaType>
-    std::unordered_map<std::string, InfoId<InfoType>> loadDatabase(const h5pp::File &h5_tgt, const std::vector<MetaType> &metas) {
-        tools::prof::t_dat.tic();
+    template<typename InfoType, typename KeyType>
+    std::unordered_map<std::string, InfoId<InfoType>> loadDatabase(const h5pp::File &h5_tgt, const std::vector<KeyType> &keys) {
+        auto t_dat_token = tools::prof::t_dat.tic_token();
         std::unordered_map<std::string, InfoId<InfoType>> infoDataBase;
         auto                                              dbGroups = h5_tgt.findGroups(".db");
         tools::logger::log->info("Found {} groups matching [.db]", dbGroups.size());
 
-        try {
-            for(auto &dbGroup : dbGroups) {
-                // Find table databases
-                tools::logger::log->info("Loading database group [{}]", dbGroup);
-                for(auto &meta : metas) {
-                    std::vector<std::string> dbNames;
-                    tools::logger::log->info("Searching for database");
-                    if constexpr(std::is_same_v<MetaType, std::string>)
-                        dbNames = h5_tgt.findDatasets(meta, dbGroup, -1, 0);
-                    else if constexpr(std::is_same_v<MetaType, DsetKey>)
-                        dbNames = h5_tgt.findDatasets(meta.name, dbGroup, -1, 0);
-                    tools::logger::log->info("Found database names {}", dbNames);
-                    if(dbNames.empty()) continue;
-                    if(dbNames.size() > 1) throw std::logic_error(h5pp::format("Found multiple seed databases: {}", dbNames));
-                    tools::logger::log->info("Loading database {}", dbNames);
-                    // Now we have to load our database, which itself is a table with fields [seed,index].
-                    // It also has a [key] attribute so that we can place it in our map, as well as a [path]
-                    // attribute to find the actual table
-                    auto dbPath = h5pp::format("{}/{}", dbGroup, dbNames.front());
-                    tools::logger::log->info("readTableRecortds({}) ", dbPath);
-                    auto seedIdDb = h5_tgt.readTableRecords<std::vector<SeedId>>(dbPath);
-                    tools::logger::log->info("readAttribute(key,{}) ", dbPath);
-                    auto infoKey = h5_tgt.readAttribute<std::string>("key", dbPath);
-                    tools::logger::log->info("readAttribute(path,{}) ", dbPath);
-                    auto infoPath = h5_tgt.readAttribute<std::string>("path", dbPath);
-                    tools::logger::log->info("getDatasetInfo(path,{}) ", infoPath);
-                    if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>)
-                        infoDataBase[infoKey] = h5_tgt.getDatasetInfo(infoPath);
-                    else if constexpr(std::is_same_v<InfoType, h5pp::TableInfo>)
-                        infoDataBase[infoKey] = h5_tgt.getTableInfo(infoPath);
-                    auto &infoId = infoDataBase[infoKey];
-                    // We can now load the seed/index database it into the map
-                    tools::logger::log->info("Loading seeds from database");
-                    for(auto &seedId : seedIdDb) infoId.db[seedId.seed] = seedId.index;
-                }
+        for(auto &dbGroup : dbGroups) {
+            // Find table databases
+            tools::logger::log->info("Loading databases in {}", dbGroup);
+            for(auto &key : keys) {
+                std::vector<std::string> dbNames;
+                tools::logger::log->trace("-- Searching for database");
+                dbNames = h5_tgt.findDatasets(key.name, dbGroup, -1, 0);
+                tools::logger::log->trace("-- Found database names {}", dbNames);
+                if(dbNames.empty()) continue;
+                if(dbNames.size() > 1) throw std::logic_error(h5pp::format("Found multiple seed databases: {}", dbNames));
+                // Now we have to load our database, which itself is a table with fields [seed,index].
+                // It also has a [key] attribute so that we can place it in our map, as well as a [path]
+                // attribute to find the actual table
+                auto dbPath = h5pp::format("{}/{}", dbGroup, dbNames.front());
+                tools::logger::log->trace("-- Loading database {}", dbPath);
+                auto seedIdDb = h5_tgt.readTableRecords<std::vector<SeedId>>(dbPath);
+                auto infoKey = h5_tgt.readAttribute<std::string>("key", dbPath);
+                auto infoPath = h5_tgt.readAttribute<std::string>("path", dbPath);
+                if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>)
+                    infoDataBase[infoKey] = h5_tgt.getDatasetInfo(infoPath);
+                else if constexpr(std::is_same_v<InfoType, h5pp::TableInfo>)
+                    infoDataBase[infoKey] = h5_tgt.getTableInfo(infoPath);
+                auto &infoId = infoDataBase[infoKey];
+                // We can now load the seed/index database it into the map
+                for(auto &seedId : seedIdDb) infoId.db[seedId.seed] = seedId.index;
             }
-        } catch(const std::exception &ex) {
-            tools::prof::t_dat.toc();
-            throw;
         }
 
-        tools::prof::t_dat.toc();
         return infoDataBase;
     }
 
-    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>> loadDatabase(const h5pp::File &h5_tgt, const std::vector<std::string> &metas);
-    template std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<DsetKey> &metas);
+    template std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<DsetKey> &keys);
+    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<TableKey> &keys);
+    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<CronoKey> &keys);
+    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<ModelKey> &keys);
 
     void saveDatabase(h5pp::File &h5_tgt, const std::unordered_map<std::string, FileId> &fileIdDb) {
-        tools::prof::t_dat.tic();
+        auto t_dat_token = tools::prof::t_dat.tic_token();
         tools::logger::log->info("Writing database: .db/files");
         if(not h5_tgt.linkExists(".db/files")) {
             H5T_FileId::register_table_type();
-            h5_tgt.createTable(H5T_FileId::h5_type, ".db/files", "File database", {1000}, 4);
+            h5_tgt.createTable(H5T_FileId::h5_type, ".db/files", "File database", {1000}, 3);
         }
         std::vector<FileId> fileIdVec;
         for(auto &fileId : fileIdDb) { fileIdVec.emplace_back(fileId.second); }
@@ -92,7 +79,6 @@ namespace tools::h5db {
         };
         std::sort(fileIdVec.begin(), fileIdVec.end(), sorter);
         h5_tgt.writeTableRecords(fileIdVec, ".db/files");
-        tools::prof::t_dat.toc();
     }
 
     void clearInfo(std::optional<h5pp::DataInfo> &info) {
@@ -125,13 +111,12 @@ namespace tools::h5db {
 
     template<typename InfoType>
     void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<InfoType>> &infoDb) {
-        tools::prof::t_dat.tic();
+        auto t_dat_token = tools::prof::t_dat.tic_token();
         std::optional<h5pp::DataInfo>  dataInfoKey;
         std::optional<h5pp::DataInfo>  dataInfoPath;
         std::optional<h5pp::AttrInfo>  attrInfoKey;
         std::optional<h5pp::AttrInfo>  attrInfoPath;
         std::optional<h5pp::TableInfo> tableInfo;
-        h5_tgt.setKeepFileOpened();
         for(auto &[infoKey, infoId] : infoDb) {
             std::vector<SeedId> seedIdxVec;
             for(auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
@@ -177,8 +162,6 @@ namespace tools::h5db {
             if(seedIdxVec.empty()) continue;
             h5_tgt.writeTableRecords(seedIdxVec, tgtDbPath);
         }
-        h5_tgt.setKeepFileClosed();
-        tools::prof::t_dat.toc();
     }
     template void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::DsetInfo>> &infoDb);
     template void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &infoDb);

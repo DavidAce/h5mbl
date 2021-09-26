@@ -29,7 +29,7 @@ endif()
 
 list(APPEND CMAKE_CXX_FLAGS                )
 list(APPEND CMAKE_CXX_FLAGS_RELEASE  -g -O3 -fno-strict-aliasing  -Wall -Wextra -Wpedantic)
-list(APPEND CMAKE_CXX_FLAGS_DEBUG    -g -O0 -fno-strict-aliasing  -Wall -Wextra -Wpedantic -fstack-protector -D_FORTIFY_SOURCE=2 -fno-omit-frame-pointer) #-D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC
+list(APPEND CMAKE_CXX_FLAGS_DEBUG    -g -O0 -fno-strict-aliasing  -Wall -Wextra -Wpedantic -fstack-protector -D_FORTIFY_SOURCE=2 -fno-omit-frame-pointer -fstandalone-debug) #-D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC
 list(APPEND CMAKE_CXX_FLAGS_RELWITHDEBINFO )
 list(APPEND CMAKE_CXX_FLAGS_MINSIZEREL)
 

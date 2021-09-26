@@ -16,6 +16,38 @@ InfoId<InfoType>::InfoId(const InfoType &info_) : info(info_) {}
 template struct InfoId<h5pp::DsetInfo>;
 template struct InfoId<h5pp::TableInfo>;
 
+PathId::PathId(std::string_view base_, std::string_view algo_, std::string_view state_, std::string_view point_)
+    : base(base_), algo(algo_), state(state_), point(point_) {
+    src_path = fmt::format("{}/{}/{}", algo, state, point);
+    tgt_path = fmt::format("{}/{}/{}/{}", base, algo, state, point);
+}
+
+bool PathId::match(std::string_view comp, std::string_view pattern) {
+    auto fuzz_pos = pattern.find_first_of('*', 0);
+    auto has_fuzz = fuzz_pos != std::string_view::npos;
+    if(has_fuzz)
+        return text::startsWith(comp, pattern.substr(0, fuzz_pos));
+    else
+        return comp == pattern;
+}
+
+bool PathId::match(std::string_view algo_pattern, std::string_view state_pattern, std::string_view point_pattern) const {
+    return match(algo, algo_pattern) and match(state, state_pattern) and match(point, point_pattern);
+}
+
+[[nodiscard]] std::string PathId::dset_path(std::string_view dsetname) const { return h5pp::format("{}/{}/{}/dsets/{}", base, algo, state, dsetname); }
+[[nodiscard]] std::string PathId::table_path(std::string_view tablename) const { return h5pp::format("{}/{}/{}/tables/{}", base, algo, state, tablename); }
+[[nodiscard]] std::string PathId::crono_path(std::string_view tablename, size_t iter) const {
+    /*
+     * When collecting a "crono" kind of table:
+     *      - the source path is <base>/<algo>/<state>/tables/<tablename>
+     *      - we find entries for all iterations in <tablename>
+     *      - we collect the contribution from each realization to each iteration separately
+     *      - the target path <base>/<algo>/<state>/cronos/iter_<iter>/<tablename>, collects all the realizations
+     */
+    return h5pp::format("{}/{}/{}/cronos/iter_{}/{}", base, algo, state, iter, tablename);
+}
+
 H5T_FileId::H5T_FileId() { register_table_type(); }
 void H5T_FileId::register_table_type() {
     if(h5_type.valid()) return;
