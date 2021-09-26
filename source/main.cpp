@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <debug/stacktrace.h>
 #include <general/class_tic_toc.h>
 #include <general/enums.h>
 #include <general/prof.h>
@@ -60,6 +62,7 @@ void clean_up() {
         try {
             tools::logger::log->info("Cleaning up temporary file: [{}]", tools::h5io::tmp_path);
             h5pp::hdf5::moveFile(tools::h5io::tmp_path, tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
+            tools::h5io::tmp_path.clear();
         } catch(const std::exception &err) { tools::logger::log->info("Cleaning not needed: {}", err.what()); }
     }
     H5garbage_collect();
@@ -72,8 +75,9 @@ int main(int argc, char *argv[]) {
     // wherever they are found (config file, h5 file)
 
     tools::logger::log = tools::logger::setLogger("h5mbl", 2);
-    std::atexit(clean_up);
-    std::at_quick_exit(clean_up);
+    // Register termination codes and what to do in those cases
+    debug::register_callbacks();
+
     tools::prof::init();
     auto                        t_tot_token  = tools::prof::t_tot.tic_token();
     h5pp::fs::path              default_base = h5pp::fs::absolute("/mnt/Barracuda/Projects/mbl_transition");
@@ -207,8 +211,9 @@ int main(int argc, char *argv[]) {
         tools::h5io::tgt_path = tgt_path.string();
         tools::logger::log->info("Moving to {} -> {}", h5_tgt.getFilePath(), tools::h5io::tmp_path);
         h5_tgt.moveFileTo(tools::h5io::tmp_path, h5pp::FilePermission::REPLACE);
+        std::atexit(clean_up);
+        std::at_quick_exit(clean_up);
     }
-
 
     //    h5_tgt.setDriver_core();
     //    h5_tgt.setKeepFileOpened();
@@ -471,7 +476,7 @@ int main(int argc, char *argv[]) {
     tools::logger::log->info("-- Total     : {:>8.3f} s", tools::prof::t_tot.get_measured_time());
     tools::logger::log->info("{}: {:.5f}", tools::prof::t_tot.get_name(), tools::prof::t_tot.get_measured_time());
 
-    if(not skip_tmp){
+    if(not skip_tmp) {
         tools::logger::log->info("Moving to {} -> {}", h5_tgt.getFilePath(), tools::h5io::tgt_path);
         h5_tgt.moveFileTo(tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
     }
