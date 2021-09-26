@@ -55,14 +55,11 @@ double compute_renyi(const std::vector<std::complex<double>> &S, double q) {
     return std::real(renyi_q(0));
 }
 
-
 void clean_up() {
-    if(not tools::h5io::tmp_path.empty() and h5pp::fs::exists(tools::h5io::tmp_path)) {
-        try {
+    try {
         tools::logger::log->info("Cleaning up temporary file: [{}]", tools::h5io::tmp_path);
-            h5pp::hdf5::moveFile(tools::h5io::tmp_path, tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
-        } catch(const std::exception &err) { tools::logger::log->info("Cleaning not needed: {}", err.what()); }
-    }
+        h5pp::hdf5::moveFile(tools::h5io::tmp_path, tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
+    } catch(const std::exception &err) { tools::logger::log->info("Cleaning not needed: {}", err.what()); }
     H5garbage_collect();
     H5Eprint(H5E_DEFAULT, stderr);
 }
@@ -136,9 +133,7 @@ int main(int argc, char *argv[]) {
     }
     tools::logger::setLogLevel(tools::logger::log, verbosity);
     tools::logger::log->info("Started h5mbl from directory {}", h5pp::fs::current_path());
-    if(src_dirs.empty()) {
-        src_dirs.emplace_back(h5pp::fs::canonical(default_base / src_out));
-    }
+    if(src_dirs.empty()) { src_dirs.emplace_back(h5pp::fs::canonical(default_base / src_out)); }
     if(src_dirs.empty()) throw std::runtime_error("Source directories are required. Pass -s <dirpath> (one or more times)");
     for(auto &src_dir : src_dirs) {
         if(not h5pp::fs::is_directory(src_dir)) throw std::runtime_error(fmt::format("Given source is not a directory: {}", src_dir.string()));
@@ -204,14 +199,13 @@ int main(int argc, char *argv[]) {
     if(replace) perm = h5pp::FilePermission::REPLACE;
     h5pp::File h5_tgt(tgt_path, perm, verbosity_h5pp);
     if(not skip_tmp) {
-        tools::h5io::tmp_path = (tmp_dir/tgt_file).string();
+        tools::h5io::tmp_path = (tmp_dir / tgt_file).string();
         tools::h5io::tgt_path = tgt_path.string();
-        tools::logger::log->info("Moving to {} -> {}",tools::h5io::tgt_path, tools::h5io::tmp_path);
+        tools::logger::log->info("Moving to {} -> {}", tools::h5io::tgt_path, tools::h5io::tmp_path);
         h5_tgt.moveFileTo(tools::h5io::tmp_path, h5pp::FilePermission::REPLACE);
         std::at_quick_exit(clean_up);
         std::atexit(clean_up);
     }
-
 
     //    h5_tgt.setDriver_core();
     //    h5_tgt.setKeepFileOpened();
