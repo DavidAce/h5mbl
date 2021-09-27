@@ -2,9 +2,9 @@
 #include <debug/stacktrace.h>
 #include <general/class_tic_toc.h>
 #include <general/enums.h>
+#include <general/human.h>
 #include <general/prof.h>
 #include <general/settings.h>
-#include <general/human.h>
 #include <getopt.h>
 #include <gitversion.h>
 #include <h5pp/h5pp.h>
@@ -242,15 +242,16 @@ int main(int argc, char *argv[]) {
     //    h5_tgt.setDriver_sec2();
 
     //    size_t                                  num_files = 0;
-    uintmax_t totalbytes = 0;
+    uintmax_t                                  srcBytes = 0;
+    uintmax_t                                  tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
     std::unordered_map<std::string, FileStats> file_stats;
     using reciter = h5pp::fs::recursive_directory_iterator;
     std::vector<h5pp::fs::path> recfiles;
     for(auto &src_dir : src_dirs) { copy(reciter(src_dir), reciter(), back_inserter(recfiles)); }
     std::sort(recfiles.begin(), recfiles.end());
     for(const auto &src_item : recfiles) {
-        auto t_itr_token = tools::prof::t_itr.tic_token();
-        const auto &src_abs = src_item;
+        auto        t_itr_token = tools::prof::t_itr.tic_token();
+        const auto &src_abs     = src_item;
         if(not src_abs.has_filename()) continue;
         if(src_abs.extension() != ".h5") continue;
         if(not src_out.empty() and src_abs.string().find(src_out) == std::string::npos) continue;
@@ -301,14 +302,13 @@ int main(int argc, char *argv[]) {
         FileId fileId(src_seed, src_abs.string(), src_hash);
 
         // We check if it's in the file database
-        auto status = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
-        auto fmt_group_bytes = tools::fmtBytes(true, file_stats[src_base].bytes,1024,1);
-        auto fmt_total_bytes = tools::fmtBytes(true, file_stats[src_base].bytes,1024,1);
-        auto fmt_speed_bytes = tools::fmtBytes(true, file_stats[src_base].get_speed(),1024,1);
-        tools::logger::log->info("Found file: {} | {} | {} | count {} | group {} | total {} | {}/s", src_rel.string(), enum2str(status), src_hash, file_stats[src_base].count,
-                                 fmt_group_bytes,
-                                 fmt_total_bytes,
-                                 fmt_speed_bytes);
+        auto status          = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
+        auto fmt_grp_bytes   = tools::fmtBytes(true, file_stats[src_base].bytes, 1024, 1);
+        auto fmt_src_bytes   = tools::fmtBytes(true, srcBytes, 1024, 1);
+        auto fmt_tgt_bytes = tools::fmtBytes(true, tgtBytes, 1024, 1);
+        auto fmt_spd_bytes   = tools::fmtBytes(true, file_stats[src_base].get_speed(), 1024, 1);
+        tools::logger::log->info(FMT_STRING("Found file: {} | {} | {} | count {} | src {} ({}) | tgt {} | {}/s"), src_rel.string(), enum2str(status), src_hash,
+                                 file_stats[src_base].count, fmt_grp_bytes, fmt_src_bytes, fmt_tgt_bytes, fmt_spd_bytes);
         tgtdb.file[fileId.path] = fileId;
         if(status == FileIdStatus::UPTODATE) continue;
 
@@ -340,12 +340,12 @@ int main(int argc, char *argv[]) {
             tools::logger::log->warn("Skipping file: {}\n\tReason: {}", src_abs.string(), ex.what());
             continue;
         }
-        if(file_stats[src_base].count == 0)
-            tools::prof::t_spd.reset();
+        if(file_stats[src_base].count == 0) tools::prof::t_spd.restart_lap();
         file_stats[src_base].count++;
         file_stats[src_base].bytes += h5pp::fs::file_size(h5_src.getFilePath());
-        file_stats[src_base].elaps += tools::prof::t_spd.restart_lap();
-        totalbytes +=h5pp::fs::file_size(h5_src.getFilePath());
+        file_stats[src_base].elaps = tools::prof::t_spd.get_lap();
+        srcBytes += h5pp::fs::file_size(h5_src.getFilePath());
+        tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
 
         t_opn_token.toc();
 
