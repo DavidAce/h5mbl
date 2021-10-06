@@ -19,7 +19,10 @@ void mpi::init() {
         auto mpiname       = fmt::format("{}-{:>{}}", tools::logger::log->name(), world.id, width);
         tools::logger::log = tools::logger::setLogger(mpiname, static_cast<size_t>(tools::logger::log->level()));
     }
+}
 
+void mpi::finalize() {
+    if(world.size > 1 or mpi::on) MPI_Finalize();
 }
 
 void mpi::scatter(std::vector<h5pp::fs::path> &data, int src) {
@@ -50,7 +53,7 @@ void mpi::scatter(std::vector<h5pp::fs::path> &data, int src) {
 
     // Now we can start sending data
 
-    size_t                      srcidx = 0;
+    size_t srcidx = 0;
     for(int dst = 0; dst < world.size; dst++) {
         if(world.id == src or world.id == dst) {
             size_t c = counts[static_cast<unsigned long>(dst)];

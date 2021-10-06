@@ -4,9 +4,9 @@
 #include <complex>
 #include <general/sfinae.h>
 #include <h5pp/details/h5ppFilesystem.h>
+#include <h5pp/details/h5ppFormat.h>
 #include <mpi.h>
 #include <vector>
-#include <h5pp/details/h5ppFormat.h>
 namespace mpi {
 
     inline bool on = false;
@@ -27,7 +27,7 @@ namespace mpi {
 
     inline comm world;
     void        init();
-
+    void        finalize();
     template<typename T>
     [[nodiscard]] constexpr MPI_Datatype get_dtype() noexcept {
         MPI_Datatype mpi_type = MPI_DATATYPE_NULL;
@@ -66,7 +66,7 @@ namespace mpi {
         return mpi_type;
     }
     template<typename T>
-    [[nodiscard]] void * get_buffer(T & data){
+    [[nodiscard]] void *get_buffer(T &data) {
         if constexpr(type::sfinae::has_data_v<T>)
             return static_cast<void *>(data.data());
         else if constexpr(std::is_pointer_v<T> or std::is_array_v<T>)
@@ -76,7 +76,7 @@ namespace mpi {
     }
 
     template<typename T>
-    [[nodiscard]] const void * get_cbuffer(const T & data){
+    [[nodiscard]] const void *get_cbuffer(const T &data) {
         if constexpr(type::sfinae::has_data_v<T>)
             return static_cast<const void *>(data.data());
         else if constexpr(std::is_pointer_v<T> or std::is_array_v<T>)
@@ -86,7 +86,7 @@ namespace mpi {
     }
 
     template<typename T>
-    [[nodiscard]] int get_count(T & data){
+    [[nodiscard]] int get_count(T &data) {
         if constexpr(type::sfinae::has_size_v<T> or std::is_array_v<T>)
             return static_cast<int>(std::size(data));
         else
@@ -95,23 +95,23 @@ namespace mpi {
 
     template<typename T>
     void send(const T &data, int dst, int tag) {
-        if constexpr(type::sfinae::has_size_v<T>){
+        if constexpr(type::sfinae::has_size_v<T>) {
             size_t count = data.size();
-            MPI_Send(&count, 1, mpi::get_dtype<size_t>(),dst, 0, MPI_COMM_WORLD);
+            MPI_Send(&count, 1, mpi::get_dtype<size_t>(), dst, 0, MPI_COMM_WORLD);
         }
 
-        MPI_Send(mpi::get_cbuffer(data), mpi::get_count(data), mpi::get_dtype<T>(),dst, tag, MPI_COMM_WORLD);
+        MPI_Send(mpi::get_cbuffer(data), mpi::get_count(data), mpi::get_dtype<T>(), dst, tag, MPI_COMM_WORLD);
     }
 
     template<typename T>
     void recv(T &data, int src, int tag) {
-        if constexpr(type::sfinae::has_size_v<T>){
+        if constexpr(type::sfinae::has_size_v<T>) {
             size_t count;
-            MPI_Recv(&count, 1, mpi::get_dtype<size_t>(),src, 0, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+            MPI_Recv(&count, 1, mpi::get_dtype<size_t>(), src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             if constexpr(type::sfinae::has_resize_v<T>) data.resize(count);
             if(data.size() < count) throw std::runtime_error(fmt::format("mpi::recv: cointainer size {} < count {}", data.size(), count));
         }
-        MPI_Recv(mpi::get_buffer(data), mpi::get_count(data), mpi::get_dtype<T>(),src, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(mpi::get_buffer(data), mpi::get_count(data), mpi::get_dtype<T>(), src, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 
     template<typename T>
@@ -122,8 +122,8 @@ namespace mpi {
         if constexpr(type::sfinae::has_resize_v<T>) {
             recv.resize(count); // Both containers are now ready to receive
         }
-        MPI_Sendrecv(mpi::get_buffer(send), mpi::get_count(send), mpi::get_dtype<T>(), dst, tag, mpi::get_buffer(recv), mpi::get_count(recv), mpi::get_dtype<T>(),
-                     src, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Sendrecv(mpi::get_buffer(send), mpi::get_count(send), mpi::get_dtype<T>(), dst, tag, mpi::get_buffer(recv), mpi::get_count(recv),
+                     mpi::get_dtype<T>(), src, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 
     template<typename T>
