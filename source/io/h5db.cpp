@@ -6,13 +6,14 @@
 #include <io/logger.h>
 #include <io/meta.h>
 #include <string>
+#include <tid/tid.h>
 #include <unordered_map>
 #include <vector>
 
 namespace tools::h5db {
 
     std::unordered_map<std::string, FileId> loadFileDatabase(const h5pp::File &h5_tgt) {
-        auto t_dat_token = tools::prof::t_dat.tic_token();
+        auto                                    t_scope = tid::tic_scope(__FUNCTION__);
         std::unordered_map<std::string, FileId> fileDatabase;
         if(h5_tgt.linkExists(".db/files")) {
             tools::logger::log->info("Loading database files");
@@ -24,7 +25,7 @@ namespace tools::h5db {
 
     template<typename InfoType, typename KeyType>
     std::unordered_map<std::string, InfoId<InfoType>> loadDatabase(const h5pp::File &h5_tgt, const std::vector<KeyType> &keys) {
-        auto t_dat_token = tools::prof::t_dat.tic_token();
+        auto                                              t_scope = tid::tic_scope(__FUNCTION__);
         std::unordered_map<std::string, InfoId<InfoType>> infoDataBase;
         auto                                              dbGroups = h5_tgt.findGroups(".db");
         tools::logger::log->info("Found {} groups matching [.db]", dbGroups.size());
@@ -45,7 +46,7 @@ namespace tools::h5db {
                 auto dbPath = h5pp::format("{}/{}", dbGroup, dbNames.front());
                 tools::logger::log->trace("-- Loading database {}", dbPath);
                 auto seedIdDb = h5_tgt.readTableRecords<std::vector<SeedId>>(dbPath);
-                auto infoKey = h5_tgt.readAttribute<std::string>("key", dbPath);
+                auto infoKey  = h5_tgt.readAttribute<std::string>("key", dbPath);
                 auto infoPath = h5_tgt.readAttribute<std::string>("path", dbPath);
                 if constexpr(std::is_same_v<InfoType, h5pp::DsetInfo>)
                     infoDataBase[infoKey] = h5_tgt.getDatasetInfo(infoPath);
@@ -60,14 +61,15 @@ namespace tools::h5db {
         return infoDataBase;
     }
 
-    template std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<DsetKey> &keys);
-    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<TableKey> &keys);
-    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<CronoKey> &keys);
-    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>  loadDatabase(const h5pp::File &h5_tgt, const std::vector<ModelKey> &keys);
+    template std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>    loadDatabase(const h5pp::File &h5_tgt, const std::vector<DsetKey> &keys);
+    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>   loadDatabase(const h5pp::File &h5_tgt, const std::vector<TableKey> &keys);
+    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>   loadDatabase(const h5pp::File &h5_tgt, const std::vector<CronoKey> &keys);
+    template std::unordered_map<std::string, InfoId<BufferedTableInfo>> loadDatabase(const h5pp::File &h5_tgt, const std::vector<CronoKey> &keys);
+    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>   loadDatabase(const h5pp::File &h5_tgt, const std::vector<ModelKey> &keys);
 
     void saveDatabase(h5pp::File &h5_tgt, const std::unordered_map<std::string, FileId> &fileIdDb) {
-        auto t_dat_token = tools::prof::t_dat.tic_token();
-        tools::logger::log->info("Writing database: .db/files");
+        auto t_scope = tid::tic_scope(__FUNCTION__);
+        tools::logger::log->debug("Writing database: .db/files");
         if(not h5_tgt.linkExists(".db/files")) {
             H5T_FileId::register_table_type();
             h5_tgt.createTable(H5T_FileId::h5_type, ".db/files", "File database", {1000}, 3);
@@ -111,12 +113,14 @@ namespace tools::h5db {
 
     template<typename InfoType>
     void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<InfoType>> &infoDb) {
-        auto t_dat_token = tools::prof::t_dat.tic_token();
+        auto t_scope = tid::tic_scope(__FUNCTION__);
+
         std::optional<h5pp::DataInfo>  dataInfoKey;
         std::optional<h5pp::DataInfo>  dataInfoPath;
         std::optional<h5pp::AttrInfo>  attrInfoKey;
         std::optional<h5pp::AttrInfo>  attrInfoPath;
         std::optional<h5pp::TableInfo> tableInfo;
+        h5_tgt.setKeepFileOpened();
         for(auto &[infoKey, infoId] : infoDb) {
             std::vector<SeedId> seedIdxVec;
             for(auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
@@ -129,11 +133,14 @@ namespace tools::h5db {
                 tgtPath = infoId.info.dsetPath.value();
             else if constexpr(std::is_same_v<InfoType, h5pp::TableInfo>)
                 tgtPath = infoId.info.tablePath.value();
-
+            else if constexpr(std::is_same_v<InfoType, BufferedTableInfo>)
+                tgtPath = infoId.info.tablePath.value();
+            else
+                throw std::runtime_error(h5pp::format("Failed to identify InfoType: {}", type::sfinae::type_name<InfoType>()));
             std::string tgtName   = tgtPath.filename();
             std::string tgtGroup  = tgtPath.parent_path();
             std::string tgtDbPath = h5pp::format("{}/.db/{}", tgtGroup, tgtName);
-            tools::logger::log->info("Writing database: {}", tgtDbPath);
+            tools::logger::log->debug("Writing database: {}", tgtDbPath);
             if(not h5_tgt.linkExists(tgtDbPath)) {
                 H5T_SeedId::register_table_type();
                 if(tableInfo) {
@@ -162,11 +169,15 @@ namespace tools::h5db {
             if(seedIdxVec.empty()) continue;
             h5_tgt.writeTableRecords(seedIdxVec, tgtDbPath);
         }
+        h5_tgt.setKeepFileClosed();
     }
     template void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::DsetInfo>> &infoDb);
     template void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &infoDb);
+    template void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<BufferedTableInfo>> &infoDb);
 
     FileIdStatus getFileIdStatus(const std::unordered_map<std::string, FileId> &fileIdDb, const FileId &newFileId) {
+        auto t_scope = tid::tic_scope(__FUNCTION__);
+
         // There can be a number of scenarios:
         // a) the entry does not exist in the database --> MISSING
         // b) the entry exists in the database and both seed and hash match --> copy index --> return UPTODATE

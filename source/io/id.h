@@ -1,20 +1,44 @@
 #pragma once
+#include <deque>
 #include <general/text.h>
 #include <h5pp/details/h5ppFormat.h>
 #include <h5pp/details/h5ppHid.h>
+#include <h5pp/details/h5ppInfo.h>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
+
+struct BufferedTableInfo {
+    private:
+    std::vector<std::byte> tmpbuffer;
+
+    public:
+    h5pp::TableInfo       *info = nullptr;
+    std::vector<std::byte> buffer;
+    std::set<size_t>       bufferedRecords;
+    size_t                 maxRecords = 1000;
+
+    BufferedTableInfo();
+    BufferedTableInfo(h5pp::TableInfo *info_);
+    BufferedTableInfo &operator=(h5pp::TableInfo *info_);
+    ~BufferedTableInfo();
+
+    void insert(const std::vector<std::byte> &entry, size_t index /* In units of table entries */);
+    void flush();
+};
 
 struct FileStats {
-    size_t    count = 0;
-    uintmax_t bytes = 0;
-    double    elaps = 0.0;
-    size_t    get_speed() const {
+    size_t               files = 0;
+    size_t               count = 0;
+    uintmax_t            bytes = 0;
+    double               elaps = 0.0;
+    [[nodiscard]] double get_speed() const {
         if(elaps == 0)
-            return 0;
+            return 0.;
         else
-            return static_cast<size_t>(static_cast<double>(bytes) / elaps);
+            return static_cast<double>(count) / elaps;
     }
 };
 
@@ -80,6 +104,17 @@ struct InfoId {
     InfoId(const InfoType &info_);
 };
 
+template<>
+struct InfoId<BufferedTableInfo> {
+    std::unordered_map<long, long> db;
+    h5pp::TableInfo                info = h5pp::TableInfo();
+    BufferedTableInfo              buff = BufferedTableInfo();
+    InfoId()                            = default;
+    InfoId(long seed_, long index_);
+    InfoId(const h5pp::TableInfo &info_);
+    InfoId &operator=(const h5pp::TableInfo &info_);
+};
+
 struct SeedId {
     long seed  = -1;
     long index = -1;
@@ -102,22 +137,36 @@ class H5T_SeedId {
     static void register_table_type();
 };
 
-struct H5T_profiling {
+// struct H5T_profiling {
+//     public:
+//     static inline h5pp::hid::h5t h5_type;
+//     struct table {
+//         double t_tot = 0;
+//         double t_pre = 0;
+//         double t_itr = 0;
+//         double t_tab = 0;
+//         double t_grp = 0;
+//         double t_get = 0;
+//         double t_dst = 0;
+//         double t_ren = 0;
+//         double t_crt = 0;
+//         double t_ham = 0;
+//         double t_dat = 0;
+//     };
+//     H5T_profiling();
+//     static void register_table_type();
+// };
+
+class H5T_profiling {
     public:
     static inline h5pp::hid::h5t h5_type;
-    struct table {
-        double t_tot = 0;
-        double t_pre = 0;
-        double t_itr = 0;
-        double t_tab = 0;
-        double t_grp = 0;
-        double t_get = 0;
-        double t_dst = 0;
-        double t_ren = 0;
-        double t_crt = 0;
-        double t_ham = 0;
-        double t_dat = 0;
+
+    struct item {
+        double time;
+        double avg;
+        size_t count;
     };
+
     H5T_profiling();
     static void register_table_type();
 };

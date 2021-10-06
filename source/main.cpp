@@ -17,7 +17,10 @@
 #include <io/logger.h>
 #include <io/meta.h>
 #include <io/parse.h>
+#include <mpi/mpi-tools.h>
+#include <omp.h>
 #include <string>
+#include <tid/tid.h>
 
 void print_usage() {
     std::printf(
@@ -25,9 +28,10 @@ void print_usage() {
 ==========  h5mbl  ============
 Usage                       : ./cpp_merger [-option <value>].
 -h                          : Help. Shows this text.
--b <base_dir>               : Default base directory (default /mnt/Barracuda/Projects/mbl_transition)
+-b <base_dir>               : Default base directory (default /mnt/WDB-AN1500/mbl_transition)
+-d <max dirs>               : Max number of directories to merge (default = inf)
 -f                          : Require that src file has finished
--m <max files>              : Max number of files to merge (default = 10000)
+-m <max files>              : Max number of files to merge (default = inf)
 -M <model>                  : Choose [sdual|lbit] (default = sdual)
 -n <tgt_filename>           : Target filename (default merged.h5)
 -o <src_out>                : Name of the output directory inside the root directory (default = "")
@@ -70,26 +74,37 @@ void clean_up() {
     H5Eprint(H5E_DEFAULT, stderr);
 }
 
+
+void close_hdf5() {
+    herr_t err = H5close();
+    if(err < 0) printf("H5close returned error %d", err);
+    H5garbage_collect();
+    H5Eprint(H5E_DEFAULT, stderr);
+}
+
 int main(int argc, char *argv[]) {
     // Here we use getopt to parse CLI input
     // Note that CLI input always override config-file values
     // wherever they are found (config file, h5 file)
-
+    auto t_h5mbl       = tid::tic_scope("h5mbl");
     tools::logger::log = tools::logger::setLogger("h5mbl", 2);
+    mpi::init();
     // Register termination codes and what to do in those cases
     debug::register_callbacks();
+    std::atexit(close_hdf5);
+    if(mpi::world.id == 0) {
+        std::atexit(tools::prof::print_profiling);
+        std::at_quick_exit(tools::prof::print_profiling);
+    }
 
-    tools::prof::init();
-    auto                        t_tot_token  = tools::prof::t_tot.tic_token();
-    auto                        t_spd_token  = tools::prof::t_spd.tic_token();
-    h5pp::fs::path              default_base = h5pp::fs::absolute("/mnt/Barracuda/Projects/mbl_transition");
+    h5pp::fs::path              default_base = h5pp::fs::absolute("/mnt/WDB-AN1500/mbl_transition");
     std::vector<h5pp::fs::path> src_dirs;
     std::string                 src_out  = "output";
     std::string                 tgt_file = "merged.h5";
     h5pp::fs::path              tgt_dir;
     h5pp::fs::path              tmp_dir        = h5pp::fs::absolute(fmt::format("/tmp/{}", tools::h5io::get_tmp_dirname(argv[0])));
     bool                        finished       = false;
-    bool                        skip_tmp       = false;
+    bool                        use_tmp        = false;
     size_t                      verbosity      = 2;
     size_t                      verbosity_h5pp = 2;
     size_t                      max_files      = std::numeric_limits<size_t>::max();
@@ -100,7 +115,7 @@ int main(int argc, char *argv[]) {
     bool                        replace        = false;
 
     while(true) {
-        char opt = static_cast<char>(getopt(argc, argv, "hb:Dfm:M:n:o:rs:t:v:V:"));
+        char opt = static_cast<char>(getopt(argc, argv, "hb:d:fm:M:n:o:rs:t:Tv:V:"));
         if(opt == EOF) break;
         if(optarg == nullptr)
             tools::logger::log->info("Parsing input argument: -{}", opt);
@@ -108,8 +123,8 @@ int main(int argc, char *argv[]) {
             tools::logger::log->info("Parsing input argument: -{} {}", opt, optarg);
         switch(opt) {
             case 'b': default_base = h5pp::fs::canonical(optarg); continue;
+            case 'd': max_dirs = std::strtoul(optarg, nullptr, 10); continue;
             case 'f': finished = true; continue;
-            case 'D': skip_tmp = true; continue;
             case 'm': max_files = std::strtoul(optarg, nullptr, 10); continue;
             case 'M': model = str2enum<Model>(std::string_view(optarg)); continue;
             case 'n': tgt_file = std::string(optarg); continue;
@@ -131,6 +146,7 @@ int main(int argc, char *argv[]) {
                 continue;
             }
             case 't': tgt_dir = h5pp::fs::absolute(optarg); continue;
+            case 'T': use_tmp = true; continue;
             case 'v': verbosity = std::strtoul(optarg, nullptr, 10); continue;
             case 'V': verbosity_h5pp = std::strtoul(optarg, nullptr, 10); continue;
             case ':': throw std::runtime_error(fmt::format("Option -{} needs a value", opt)); break;
@@ -197,6 +213,8 @@ int main(int argc, char *argv[]) {
             keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "number_entropies"));       // Available in v2
             keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "truncation_errors"));      // Available in v2
 
+
+
             //            keys.dsets.emplace_back(DsetKey("fLBIT", "state_*", "finished", "schmidt_midchain", Size::VAR, Type::COMPLEX));
             //            keys.dsets.emplace_back(DsetKey("fLBIT", "state_*", "finished/profiling", "fLBIT.run", Size::FIX, Type::TID));
             break;
@@ -207,292 +225,239 @@ int main(int argc, char *argv[]) {
     // Open the target file
     auto perm = h5pp::FilePermission::READWRITE;
     if(replace) perm = h5pp::FilePermission::REPLACE;
-    h5pp::File h5_tgt(tgt_path, perm, verbosity_h5pp);
-    if(not skip_tmp) {
-        tools::h5io::tmp_path = (tmp_dir / tgt_file).string();
-        tools::h5io::tgt_path = tgt_path.string();
-        tools::logger::log->info("Moving to {} -> {}", h5_tgt.getFilePath(), tools::h5io::tmp_path);
-        h5_tgt.moveFileTo(tools::h5io::tmp_path, h5pp::FilePermission::REPLACE);
-        std::atexit(clean_up);
-        std::at_quick_exit(clean_up);
-    }
 
-    //    h5_tgt.setDriver_core();
-    //    h5_tgt.setKeepFileOpened();
-    h5_tgt.setCompressionLevel(3);
-    //    size_t rdcc_nbytes = 1024 * 1024 * 1024;
-    //    H5Pset_cache(h5_tgt.plists.fileAccess, 1000, 7919,rdcc_nbytes, 0.0 );
-
-    if(not h5_tgt.linkExists("git/h5mbl")) {
-        // Put git metadata in the target file
-        h5_tgt.writeDataset(GIT::BRANCH, "git/h5mbl/branch");
-        h5_tgt.writeDataset(GIT::COMMIT_HASH, "git/h5mbl/commit");
-        h5_tgt.writeDataset(GIT::REVISION, "git/h5mbl/revision");
-    }
-
-    tools::h5db::TgtDb tgtdb;
-    //    h5_tgt.setDriver_core();
-    h5_tgt.setKeepFileOpened();
-    tgtdb.file  = tools::h5db::loadFileDatabase(h5_tgt); // This database maps  src_name <--> FileId
-    tgtdb.dset  = tools::h5db::loadDatabase<h5pp::DsetInfo>(h5_tgt, keys.dsets);
-    tgtdb.table = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.tables);
-    tgtdb.crono = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.cronos);
-    tgtdb.model = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.models);
-    h5_tgt.setKeepFileClosed();
-    //    h5_tgt.setDriver_sec2();
-
-    //    size_t                                  num_files = 0;
-    uintmax_t                                  srcBytes = 0;
-    uintmax_t                                  tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
+    auto h5dirs = tools::io::find_h5_dirs(src_dirs, max_dirs);
+    tools::logger::log->info("num h5dirs: {}", h5dirs.size());
     std::unordered_map<std::string, FileStats> file_stats;
-    using reciter = h5pp::fs::recursive_directory_iterator;
-    std::vector<h5pp::fs::path> recfiles;
-    for(auto &src_dir : src_dirs) { copy(reciter(src_dir), reciter(), back_inserter(recfiles)); }
-    std::sort(recfiles.begin(), recfiles.end());
-    for(const auto &src_item : recfiles) {
-        auto        t_itr_token = tools::prof::t_itr.tic_token();
-        const auto &src_abs     = src_item;
-        if(not src_abs.has_filename()) continue;
-        if(src_abs.extension() != ".h5") continue;
-        if(not src_out.empty() and src_abs.string().find(src_out) == std::string::npos) continue;
 
-        t_itr_token.toc();
+    for(const auto &h5dir : h5dirs) {
+        // Define a new target h5file for the files in this h5dir
+        auto h5dir_hash  = tools::hash::std_hash(h5dir.string());
+        auto h5_tgt_path = h5pp::format("{}/{}.{}{}", tgt_dir.string(), h5pp::fs::path(tgt_path).stem().string(), tools::hash::std_hash(h5dir.string()),
+                                        h5pp::fs::path(tgt_path).extension().string());
 
-        auto t_pre_token = tools::prof::t_pre.tic_token();
+        tools::logger::log->info("will create file {}", h5_tgt_path);
 
-        // Check which source root this belongs to
-        // TODO: What does this do? Expand comment
-        h5pp::fs::path src_dir;
-        for(auto &src_can : src_dirs) {
-            auto [it1, it2] = std::mismatch(src_can.begin(), src_can.end(), src_abs.begin());
-            if(it1 == src_can.end()) {
-                src_dir = src_can;
-                break;
-            }
+        // Initialize file
+//        auto plists = h5pp::defaultPlists;
+//        plists.fileCreate = H5Pcreate(H5P_FILE_CREATE);
+//        plists.fileAccess = H5Pcreate(H5P_FILE_ACCESS);
+
+//        herr_t ers    = H5Pset_file_space_strategy(plists.fileCreate, H5F_FSPACE_STRATEGY_PAGE, true, 1);
+//        herr_t erp =    H5Pset_file_space_page_size(plists.fileCreate,100 * 1024);
+//        herr_t erb    = H5Pset_page_buffer_size(plists.fileAccess, 10 * 1024 * 1024, 1, 1);
+        auto   h5_tgt = h5pp::File(h5_tgt_path, perm, verbosity_h5pp);
+//        hsize_t fsp_size; size_t pbs_size;
+//        H5Pget_file_space_page_size(H5Fget_create_plist(h5_tgt.openFileHandle()), &fsp_size);
+//        H5Pget_page_buffer_size(H5Fget_access_plist(h5_tgt.openFileHandle()),&pbs_size,nullptr,nullptr);
+//        tools::logger::log->info("fsp_size: {} | pbs_size {}", fsp_size, pbs_size);
+
+        //            h5_tgt.setDriver_core();
+        //    h5_tgt.setKeepFileOpened();
+        h5_tgt.setCompressionLevel(2);
+        //        size_t rdcc_nbytes = 4*1024*1024;
+        //        size_t rdcc_nslots = rdcc_nbytes * 100 / (320 * 64);
+        //        H5Pset_cache(h5_tgt.plists.fileAccess, 1000, rdcc_nslots,rdcc_nbytes, 0.20 );
+        //
+        //        h5pp::hdf5::setTableSize(tableInfo, 2500);
+        //        h5pp::hid::h5p dapl = H5Dget_access_plist(tableInfo.h5Dset.value());
+        //        size_t rdcc_nbytes = 4*1024*1024;
+        //        size_t rdcc_nslots = rdcc_nbytes * 100 / (tableInfo.recordBytes.value() * tableInfo.chunkSize.value());
+        //        H5Pset_chunk_cache(dapl, rdcc_nslots, rdcc_nbytes, 0.5);
+        //        tableInfo.h5Dset = h5pp::hdf5::openLink<h5pp::hid::h5d>(tableInfo.getLocId(), tableInfo.tablePath.value(), true, dapl);
+
+        if(use_tmp) {
+            tools::h5io::tmp_path = (tmp_dir / tgt_file).string();
+            tools::h5io::tgt_path = tgt_path.string();
+            tools::logger::log->info("Moving to {} -> {}", h5_tgt.getFilePath(), tools::h5io::tmp_path);
+            h5_tgt.moveFileTo(tools::h5io::tmp_path, h5pp::FilePermission::REPLACE);
+            std::atexit(clean_up);
+            std::at_quick_exit(clean_up);
         }
-        if(src_dir.empty()) throw std::runtime_error("Could not infer root src_dir from src_abs");
+        MPI_Barrier(MPI_COMM_WORLD);
 
-        auto src_rel  = h5pp::fs::relative(src_abs, src_dir);
-        auto src_base = src_rel.parent_path();
+        // Load database
+        tools::h5db::TgtDb tgtdb;
+        //    h5_tgt.setDriver_core();
+        h5_tgt.setKeepFileOpened();
+        tgtdb.file  = tools::h5db::loadFileDatabase(h5_tgt); // This database maps  src_name <--> FileId
+        tgtdb.dset  = tools::h5db::loadDatabase<h5pp::DsetInfo>(h5_tgt, keys.dsets);
+        tgtdb.table = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.tables);
+        tgtdb.crono = tools::h5db::loadDatabase<BufferedTableInfo>(h5_tgt, keys.cronos);
+        tgtdb.model = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.models);
+        h5_tgt.setKeepFileClosed();
 
-        bool stats_exists = file_stats.find(src_base) != file_stats.end();
-        if(not stats_exists) {
-            if(file_stats.size() >= max_dirs)
-                break;
-            else
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        uintmax_t srcBytes = 0;
+        uintmax_t tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
+
+        // Collect and sort all the files in h5dir
+        using h5iter = h5pp::fs::directory_iterator;
+        std::vector<h5pp::fs::path> h5files;
+        copy(h5iter(h5dir), h5iter(), back_inserter(h5files));
+        std::sort(h5files.begin(), h5files.end());
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        tools::logger::log->info("num h5files: {}", h5files.size());
+        // No barriers from now on: There can be a different number of files in h5files!
+        for(const auto &src_item : h5files) {
+            auto        t_src_item = tid::tic_scope("src_item");
+            const auto &src_abs    = src_item;
+            if(not h5pp::fs::is_regular_file(src_abs)) continue;
+            if(src_abs.extension() != ".h5") continue;
+
+            auto t_pre = tid::tic_scope("preamble");
+
+            // Check which source root this belongs to
+            // TODO: What does this do? Expand comment
+            h5pp::fs::path src_dir;
+            for(auto &src_can : src_dirs) {
+                auto [it1, it2] = std::mismatch(src_can.begin(), src_can.end(), src_abs.begin());
+                if(it1 == src_can.end()) {
+                    src_dir = src_can;
+                    break;
+                }
+            }
+            if(src_dir.empty()) throw std::runtime_error("Could not infer root src_dir from src_abs");
+
+            auto src_rel  = h5pp::fs::relative(src_abs, src_dir);
+            auto src_base = src_rel.parent_path();
+
+            bool stats_exists = file_stats.find(src_base) != file_stats.end();
+            if(not stats_exists) {
+                // Creeate new entry
                 file_stats[src_base].count = 0;
-        } else if(file_stats[src_base].count >= max_files) {
-            tools::logger::log->debug("Max files reached in {}: {}", src_base, file_stats[src_base].count);
-            continue;
-        }
+                file_stats[src_base].files = h5files.size();
+            } else if(file_stats[src_base].count >= max_files) {
+                tools::logger::log->debug("Max files reached in {}: {}", src_base, file_stats[src_base].count);
+                break;
+            }
 
-        // Append latest profiling information to table
-        tools::prof::append();
-        t_pre_token.toc();
+            // Append latest profiling information to table
+            t_pre.toc();
 
-        // We should now have enough to define a FileId
-        auto t_hsh_token = tools::prof::t_hsh.tic_token();
-        auto src_hash    = tools::hash::md5_file_meta(src_abs);
-        auto src_seed    = tools::parse::extract_digits_from_h5_filename<long>(src_rel.filename());
-        if(src_seed != std::clamp<long>(src_seed, seed_min, seed_max)) {
-            tools::logger::log->warn("Skipping seed {}: Valid are [{}-{}]", src_seed, seed_min, seed_max);
-            continue;
-        }
-
-        FileId fileId(src_seed, src_abs.string(), src_hash);
-
-        // We check if it's in the file database
-        auto status          = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
-        auto fmt_grp_bytes   = tools::fmtBytes(true, file_stats[src_base].bytes, 1024, 1);
-        auto fmt_src_bytes   = tools::fmtBytes(true, srcBytes, 1024, 1);
-        auto fmt_tgt_bytes = tools::fmtBytes(true, tgtBytes, 1024, 1);
-        auto fmt_spd_bytes   = tools::fmtBytes(true, file_stats[src_base].get_speed(), 1024, 1);
-        tools::logger::log->info(FMT_STRING("Found file: {} | {} | {} | count {} | src {} ({}) | tgt {} | {}/s"), src_rel.string(), enum2str(status), src_hash,
-                                 file_stats[src_base].count, fmt_grp_bytes, fmt_src_bytes, fmt_tgt_bytes, fmt_spd_bytes);
-        tgtdb.file[fileId.path] = fileId;
-        if(status == FileIdStatus::UPTODATE) continue;
-
-        // If we've reached this point we will start reading from h5_src many times.
-        t_hsh_token.toc();
-        auto t_opn_token = tools::prof::t_opn.tic_token();
-
-        h5pp::File h5_src;
-        try {
-            h5_src = h5pp::File(src_abs.string(), h5pp::FilePermission::READONLY, verbosity_h5pp);
-            //                        h5_src.setDriver_core(false, 10 * 1024 * 1024);
-            //            h5_src.setDriver_sec2();
-            //            h5_src.setDriver_core();
-            //            H5Pset_cache(h5_src.plists.fileAccess, 1000, 7919,rdcc_nbytes, 0.0 );
-        } catch(const std::exception &ex) {
-            tools::logger::log->warn("Skipping broken file: {}\n\tReason: {}\n", src_abs.string(), ex.what());
-            continue;
-        }
-        try {
-            if(not h5_src.linkExists("common/finished_all")) {
-                tools::logger::log->warn("Skipping broken file: {}\n\tReason: Could not find dataset [common/finished_all]", src_abs.string());
+            // We should now have enough to define a FileId
+            auto src_hash = tools::hash::hash_file_meta(src_abs);
+            auto src_seed = tools::parse::extract_digits_from_h5_filename<long>(src_rel.filename());
+            if(src_seed != std::clamp<long>(src_seed, seed_min, seed_max)) {
+                tools::logger::log->warn("Skipping seed {}: Valid are [{}-{}]", src_seed, seed_min, seed_max);
                 continue;
             }
-            if(finished and not h5_src.readDataset<bool>("common/finished_all")) {
-                tools::logger::log->warn("Skipping file: {}\n\tReason: Simulation has not finished", src_abs.string());
+
+            FileId fileId(src_seed, src_abs.string(), src_hash);
+
+            // We check if it's in the file database
+            auto status        = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
+            auto fmt_grp_bytes = tools::fmtBytes(true, file_stats[src_base].bytes, 1024, 1);
+            auto fmt_src_bytes = tools::fmtBytes(true, srcBytes, 1024, 1);
+            auto fmt_tgt_bytes = tools::fmtBytes(true, tgtBytes, 1024, 1);
+            auto fmt_spd_bytes = fmt::format("{:.1f} files", file_stats[src_base].get_speed());
+            tools::logger::log->info(FMT_STRING("Found file: {} | {} | {} | count {} | src {} ({}) | tgt {} | {}/s"), src_rel.string(), enum2str(status),
+                                     src_hash, file_stats[src_base].count, fmt_grp_bytes, fmt_src_bytes, fmt_tgt_bytes, fmt_spd_bytes);
+            tgtdb.file[fileId.path] = fileId;
+            if(status == FileIdStatus::UPTODATE) continue;
+
+            // If we've reached this point we will start reading from h5_src many times.
+            auto t_open = tid::tic_scope("open");
+
+            h5pp::File h5_src;
+            try {
+                h5_src = h5pp::File(src_abs.string(), h5pp::FilePermission::READONLY, verbosity_h5pp);
+                // h5_src.setDriver_core(false, 10 * 1024 * 1024);
+                // h5_src.setDriver_sec2();
+                //                 h5_src.setDriver_core();
+                // H5Pset_cache(h5_src.plists.fileAccess, 1000, 7919,rdcc_nbytes, 0.0 );
+            } catch(const std::exception &ex) {
+                tools::logger::log->warn("Skipping broken file: {}\n\tReason: {}\n", src_abs.string(), ex.what());
                 continue;
             }
-        } catch(const std::exception &ex) {
-            tools::logger::log->warn("Skipping file: {}\n\tReason: {}", src_abs.string(), ex.what());
-            continue;
-        }
-        if(file_stats[src_base].count == 0) tools::prof::t_spd.restart_lap();
-        file_stats[src_base].count++;
-        file_stats[src_base].bytes += h5pp::fs::file_size(h5_src.getFilePath());
-        file_stats[src_base].elaps = tools::prof::t_spd.get_lap();
-        srcBytes += h5pp::fs::file_size(h5_src.getFilePath());
-        tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
-
-        t_opn_token.toc();
-
-        {
-            auto t_mrg_set_token = tools::prof::t_mrg_set.tic_token();
-            h5_src.setKeepFileOpened();
-            h5_tgt.setKeepFileOpened();
-            switch(model) {
-                case Model::SDUAL: {
-                    tools::h5io::merge<sdual>(h5_tgt, h5_src, fileId, keys, tgtdb);
-                    break;
+            try {
+                if(not h5_src.linkExists("common/finished_all")) {
+                    tools::logger::log->warn("Skipping broken file: {}\n\tReason: Could not find dataset [common/finished_all]", src_abs.string());
+                    continue;
                 }
-                case Model::LBIT: {
-                    tools::h5io::merge<lbit>(h5_tgt, h5_src, fileId, keys, tgtdb);
-                    break;
+                if(finished and not h5_src.readDataset<bool>("common/finished_all")) {
+                    tools::logger::log->warn("Skipping file: {}\n\tReason: Simulation has not finished", src_abs.string());
+                    continue;
                 }
+            } catch(const std::exception &ex) {
+                tools::logger::log->warn("Skipping file: {}\n\tReason: {}", src_abs.string(), ex.what());
+                continue;
             }
-            h5_src.setKeepFileClosed();
-            h5_tgt.setKeepFileClosed();
+            file_stats[src_base].elaps = file_stats[src_base].count == 0 ? t_src_item->restart_lap() : t_src_item->get_lap();
+            file_stats[src_base].count++;
+            file_stats[src_base].bytes += h5pp::fs::file_size(h5_src.getFilePath());
+            srcBytes += h5pp::fs::file_size(h5_src.getFilePath());
+            tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
+            t_open.toc();
+
+            {
+                h5_src.setKeepFileOpened();
+                h5_tgt.setKeepFileOpened();
+                switch(model) {
+                    case Model::SDUAL: {
+                        tools::h5io::merge<sdual>(h5_tgt, h5_src, fileId, file_stats[src_base], keys, tgtdb);
+                        break;
+                    }
+                    case Model::LBIT: {
+                        tools::h5io::merge<lbit>(h5_tgt, h5_src, fileId, file_stats[src_base], keys, tgtdb);
+                        break;
+                    }
+                }
+                h5_src.setKeepFileClosed();
+                h5_tgt.setKeepFileClosed();
+            }
+
+            tools::logger::log->debug("mem[rss {:<.2f}|peak {:<.2f}|vm {:<.2f}]MB | file db size {}", tools::prof::mem_rss_in_mb(),
+                                      tools::prof::mem_hwm_in_mb(), tools::prof::mem_vm_in_mb(), tgtdb.file.size());
+            if constexpr(settings::debug) {
+                auto src_count_open_id = H5Fget_obj_count(h5_src.openFileHandle(), H5F_OBJ_ALL);
+                auto src_count_file_id = H5Fget_obj_count(h5_src.openFileHandle(), H5F_OBJ_FILE);
+                auto tgt_count_open_id = H5Fget_obj_count(h5_tgt.openFileHandle(), H5F_OBJ_ALL);
+                auto tgt_count_file_id = H5Fget_obj_count(h5_tgt.openFileHandle(), H5F_OBJ_FILE);
+                tools::logger::log->debug("open ids: tgt [objs {} file {}] src [objs {} file {}]", tgt_count_open_id, tgt_count_file_id, src_count_open_id,
+                                          src_count_file_id);
+            }
         }
-        auto t_cnt_token = tools::prof::t_cnt.tic_token();
 
-        tools::logger::log->debug("mem[rss {:<.2f}|peak {:<.2f}|vm {:<.2f}]MB | file db size {}", tools::prof::mem_rss_in_mb(), tools::prof::mem_hwm_in_mb(),
-                                  tools::prof::mem_vm_in_mb(), tgtdb.file.size());
-        if constexpr(settings::debug) {
-            auto src_count_open_id = H5Fget_obj_count(h5_src.openFileHandle(), H5F_OBJ_ALL);
-            auto src_count_file_id = H5Fget_obj_count(h5_src.openFileHandle(), H5F_OBJ_FILE);
-            auto tgt_count_open_id = H5Fget_obj_count(h5_tgt.openFileHandle(), H5F_OBJ_ALL);
-            auto tgt_count_file_id = H5Fget_obj_count(h5_tgt.openFileHandle(), H5F_OBJ_FILE);
-            tools::logger::log->debug("open ids: tgt [objs {} file {}] src [objs {} file {}]", tgt_count_open_id, tgt_count_file_id, src_count_open_id,
-                                      src_count_file_id);
+        // TODO: Put the lines below in a "at quick exit" function
+        tools::h5io::writeProfiling(h5_tgt);
+
+        tools::h5db::saveDatabase(h5_tgt, tgtdb.file);
+        tools::h5db::saveDatabase(h5_tgt, tgtdb.model);
+        tools::h5db::saveDatabase(h5_tgt, tgtdb.table);
+        tools::h5db::saveDatabase(h5_tgt, tgtdb.crono);
+        tools::h5db::saveDatabase(h5_tgt, tgtdb.dset);
+        tgtdb.file.clear();
+        tgtdb.model.clear();
+        tgtdb.table.clear();
+        tgtdb.crono.clear();
+        tgtdb.dset.clear();
+        h5_tgt.flush();
+        auto ssize_objids = H5Fget_obj_count(h5_tgt.openFileHandle(), H5F_OBJ_ALL);
+        if(ssize_objids > 0) {
+            auto               size_objids = static_cast<size_t>(ssize_objids);
+            std::vector<hid_t> objids(size_objids);
+            H5Fget_obj_ids(h5_tgt.openFileHandle(), H5F_OBJ_ALL, size_objids, objids.data());
+            tools::logger::log->info("File [{}] has {} open ids: {}", h5_tgt.getFilePath(), size_objids, objids);
+            for(auto &id : objids) tools::logger::log->info("{}", tools::h5dbg::get_hid_string_details(id));
+        } else if(ssize_objids < 0) {
+            tools::logger::log->info("File [{}] failed to count ids: {}", h5_tgt.getFilePath(), ssize_objids);
+        }
+        // Check that there are no errors hiding in the HDF5 error-stack
+        auto num_errors = H5Eget_num(H5E_DEFAULT);
+        if(num_errors > 0) {
+            H5Eprint(H5E_DEFAULT, stderr);
+            throw std::runtime_error(fmt::format("Error when treating file [{}]", h5_tgt.getFilePath()));
         }
 
-        t_cnt_token.toc();
-        /* clang-format off */
-        tools::logger::log->debug("-- Open  file: {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_opn.get_last_interval(), tools::prof::t_opn.get_measured_time());
-        tools::logger::log->debug("-- Close file: {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_clo.get_last_interval(), tools::prof::t_clo.get_measured_time());
-        tools::logger::log->debug("-- Prep  file: {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_pre.get_last_interval(), tools::prof::t_pre.get_measured_time());
-        tools::logger::log->debug("-- Hash  file: {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_hsh.get_last_interval(), tools::prof::t_hsh.get_measured_time());
-        tools::logger::log->debug("-- Count ids : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_cnt.get_last_interval(), tools::prof::t_cnt.get_measured_time());
-        tools::logger::log->debug("-- Iterate   : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_itr.get_last_interval(), tools::prof::t_itr.get_measured_time());
-        tools::logger::log->debug("-- Find Keys : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_fnd.restart_lap(), tools::prof::t_fnd.get_measured_time());
-        tools::logger::log->debug("-- Merge file: {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_mrg.get_last_interval(), tools::prof::t_mrg.get_measured_time());
-        tools::logger::log->debug("-- -- set    : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_mrg_set.get_last_interval(), tools::prof::t_mrg_set.get_measured_time());
-        tools::logger::log->debug("-- -- dsets  : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_mrg_dst.get_lap(), tools::prof::t_mrg_dst.get_measured_time());
-        tools::logger::log->debug("-- -- tables : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_mrg_tab.get_lap(), tools::prof::t_mrg_tab.get_measured_time());
-        tools::logger::log->debug("-- -- cronos : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_mrg_cro.get_lap(), tools::prof::t_mrg_cro.get_measured_time());
-        tools::logger::log->debug("-- Dsets     : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_mrg_dst.restart_lap(), tools::prof::t_mrg_dst.get_measured_time());
-        tools::logger::log->debug("-- -- gather : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_dst_get.restart_lap(), tools::prof::t_dst_get.get_measured_time());
-        tools::logger::log->debug("-- -- transf : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_dst_trn.restart_lap(), tools::prof::t_dst_trn.get_measured_time());
-        tools::logger::log->debug("-- -- copy   : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_dst_cpy.restart_lap(), tools::prof::t_dst_cpy.get_measured_time());
-        tools::logger::log->debug("-- -- create : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_dst_crt.restart_lap(), tools::prof::t_dst_crt.get_measured_time());
-        tools::logger::log->debug("-- Tables    : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_mrg_tab.restart_lap(), tools::prof::t_mrg_tab.get_measured_time());
-        tools::logger::log->debug("-- -- gather : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_tab_get.restart_lap(), tools::prof::t_tab_get.get_measured_time());
-        tools::logger::log->debug("-- -- transf : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_tab_trn.restart_lap(), tools::prof::t_tab_trn.get_measured_time());
-        tools::logger::log->debug("-- -- copy   : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_tab_cpy.restart_lap(), tools::prof::t_tab_cpy.get_measured_time());
-        tools::logger::log->debug("-- -- create : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_tab_crt.restart_lap(), tools::prof::t_tab_crt.get_measured_time());
-        tools::logger::log->debug("-- Cronos    : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_mrg_cro.restart_lap(), tools::prof::t_mrg_cro.get_measured_time());
-        tools::logger::log->debug("-- -- gather : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_cro_get.restart_lap(), tools::prof::t_cro_get.get_measured_time());
-        tools::logger::log->debug("-- -- transf : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_cro_trn.restart_lap(), tools::prof::t_cro_trn.get_measured_time());
-        tools::logger::log->debug("-- -- copy   : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_cro_cpy.restart_lap(), tools::prof::t_cro_cpy.get_measured_time());
-        tools::logger::log->debug("-- -- create : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_cro_crt.restart_lap(), tools::prof::t_cro_crt.get_measured_time());
-        tools::logger::log->debug("-- model     : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_ham.get_last_interval(), tools::prof::t_ham.get_measured_time());
-        tools::logger::log->debug("-- gr1       : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_gr1.get_last_interval(), tools::prof::t_gr1.get_measured_time());
-        tools::logger::log->debug("-- gr2       : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_gr2.get_last_interval(), tools::prof::t_gr2.get_measured_time());
-        tools::logger::log->debug("-- gr3       : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_gr3.get_last_interval(), tools::prof::t_gr3.get_measured_time());
-        tools::logger::log->debug("-- ch1       : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_ch1.get_last_interval(), tools::prof::t_ch1.get_measured_time());
-        tools::logger::log->debug("-- ch2       : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_ch2.get_last_interval(), tools::prof::t_ch2.get_measured_time());
-        tools::logger::log->debug("-- ch3       : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_ch3.get_last_interval(), tools::prof::t_ch3.get_measured_time());
-        tools::logger::log->debug("-- ch4       : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_ch4.get_last_interval(), tools::prof::t_ch4.get_measured_time());
-        tools::logger::log->debug("-- Total     : {:>10.3f} ms | {:>8.3f} s", 1000 * tools::prof::t_tot.restart_lap(), tools::prof::t_tot.get_measured_time());
-        /* clang-format on */
+        if(use_tmp) {
+            tools::logger::log->info("Moving to {} -> {}", h5_tgt.getFilePath(), tools::h5io::tgt_path);
+            h5_tgt.moveFileTo(tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
+        }
+
+
+        tools::logger::log->info("Results written to file {}", tgt_path.string());
     }
-
-    // TODO: Put the lines below in a "at quick exit" function
-
-    tools::prof::append();
-    tools::h5io::writeProfiling(h5_tgt);
-
-    tools::h5db::saveDatabase(h5_tgt, tgtdb.file);
-    tools::h5db::saveDatabase(h5_tgt, tgtdb.model);
-    tools::h5db::saveDatabase(h5_tgt, tgtdb.table);
-    tools::h5db::saveDatabase(h5_tgt, tgtdb.dset);
-    tgtdb.file.clear();
-    tgtdb.model.clear();
-    tgtdb.table.clear();
-    tgtdb.dset.clear();
-
-    auto ssize_objids = H5Fget_obj_count(h5_tgt.openFileHandle(), H5F_OBJ_ALL);
-    if(ssize_objids > 0) {
-        auto               size_objids = static_cast<size_t>(ssize_objids);
-        std::vector<hid_t> objids(size_objids);
-        H5Fget_obj_ids(h5_tgt.openFileHandle(), H5F_OBJ_ALL, size_objids, objids.data());
-        tools::logger::log->info("File [{}] has {} open ids: {}", h5_tgt.getFilePath(), size_objids, objids);
-        for(auto &id : objids) tools::logger::log->info("{}", tools::h5dbg::get_hid_string_details(id));
-    } else if(ssize_objids < 0) {
-        tools::logger::log->info("File [{}] failed to count ids: {}", h5_tgt.getFilePath(), ssize_objids);
-    }
-    // Check that there are no errors hiding in the HDF5 error-stack
-    auto num_errors = H5Eget_num(H5E_DEFAULT);
-    if(num_errors > 0) {
-        H5Eprint(H5E_DEFAULT, stderr);
-        throw std::runtime_error(fmt::format("Error when treating file [{}]", h5_tgt.getFilePath()));
-    }
-
-    tools::logger::log->info("-- Open  file: {:>8.3f} s", tools::prof::t_opn.get_measured_time());
-    tools::logger::log->info("-- Close file: {:>8.3f} s", tools::prof::t_clo.get_measured_time());
-    tools::logger::log->info("-- Prep  file: {:>8.3f} s", tools::prof::t_pre.get_measured_time());
-    tools::logger::log->info("-- Hash  file: {:>8.3f} s", tools::prof::t_hsh.get_measured_time());
-    tools::logger::log->info("-- Count ids : {:>8.3f} s", tools::prof::t_cnt.get_measured_time());
-    tools::logger::log->info("-- Iterate   : {:>8.3f} s", tools::prof::t_itr.get_measured_time());
-    tools::logger::log->info("-- Find Keys : {:>8.3f} s", tools::prof::t_fnd.get_measured_time());
-    tools::logger::log->info("-- Merge file: {:>8.3f} s", tools::prof::t_mrg.get_measured_time());
-    tools::logger::log->info("-- -- set    : {:>8.3f} s", tools::prof::t_mrg_set.get_measured_time());
-    tools::logger::log->info("-- -- dsets  : {:>8.3f} s", tools::prof::t_mrg_dst.get_measured_time());
-    tools::logger::log->info("-- -- tables : {:>8.3f} s", tools::prof::t_mrg_tab.get_measured_time());
-    tools::logger::log->info("-- -- cronos : {:>8.3f} s", tools::prof::t_mrg_cro.get_measured_time());
-    tools::logger::log->info("-- Dsets     : {:>8.3f} s", tools::prof::t_mrg_dst.get_measured_time());
-    tools::logger::log->info("-- -- gather : {:>8.3f} s", tools::prof::t_dst_get.get_measured_time());
-    tools::logger::log->info("-- -- transf : {:>8.3f} s", tools::prof::t_dst_trn.get_measured_time());
-    tools::logger::log->info("-- -- copy   : {:>8.3f} s", tools::prof::t_dst_cpy.get_measured_time());
-    tools::logger::log->info("-- -- create : {:>8.3f} s", tools::prof::t_dst_crt.get_measured_time());
-    tools::logger::log->info("-- Tables    : {:>8.3f} s", tools::prof::t_mrg_tab.get_measured_time());
-    tools::logger::log->info("-- -- gather : {:>8.3f} s", tools::prof::t_tab_get.get_measured_time());
-    tools::logger::log->info("-- -- transf : {:>8.3f} s", tools::prof::t_tab_trn.get_measured_time());
-    tools::logger::log->info("-- -- copy   : {:>8.3f} s", tools::prof::t_tab_cpy.get_measured_time());
-    tools::logger::log->info("-- -- create : {:>8.3f} s", tools::prof::t_tab_crt.get_measured_time());
-    tools::logger::log->info("-- Cronos    : {:>8.3f} s", tools::prof::t_mrg_cro.get_measured_time());
-    tools::logger::log->info("-- -- gather : {:>8.3f} s", tools::prof::t_cro_get.get_measured_time());
-    tools::logger::log->info("-- -- transf : {:>8.3f} s", tools::prof::t_cro_trn.get_measured_time());
-    tools::logger::log->info("-- -- copy   : {:>8.3f} s", tools::prof::t_cro_cpy.get_measured_time());
-    tools::logger::log->info("-- -- create : {:>8.3f} s", tools::prof::t_cro_crt.get_measured_time());
-    tools::logger::log->info("-- model     : {:>8.3f} s", tools::prof::t_ham.get_measured_time());
-    tools::logger::log->info("-- gr1       : {:>8.3f} s", tools::prof::t_gr1.get_measured_time());
-    tools::logger::log->info("-- gr2       : {:>8.3f} s", tools::prof::t_gr2.get_measured_time());
-    tools::logger::log->info("-- gr3       : {:>8.3f} s", tools::prof::t_gr3.get_measured_time());
-    tools::logger::log->info("-- ch1       : {:>8.3f} s", tools::prof::t_ch1.get_measured_time());
-    tools::logger::log->info("-- ch2       : {:>8.3f} s", tools::prof::t_ch2.get_measured_time());
-    tools::logger::log->info("-- ch3       : {:>8.3f} s", tools::prof::t_ch3.get_measured_time());
-    tools::logger::log->info("-- ch4       : {:>8.3f} s", tools::prof::t_ch4.get_measured_time());
-    tools::logger::log->info("-- Total     : {:>8.3f} s", tools::prof::t_tot.get_measured_time());
-    tools::logger::log->info("{}: {:.5f}", tools::prof::t_tot.get_name(), tools::prof::t_tot.get_measured_time());
-
-    if(not skip_tmp) {
-        tools::logger::log->info("Moving to {} -> {}", h5_tgt.getFilePath(), tools::h5io::tgt_path);
-        h5_tgt.moveFileTo(tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
-    }
-
-    tools::logger::log->info("Results written to file {}", tgt_path.string());
 }

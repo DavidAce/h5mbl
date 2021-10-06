@@ -27,7 +27,7 @@ size_t tools::logger::getLogLevel(std::shared_ptr<spdlog::logger> &log) { return
 
 void tools::logger::setLogger(std::shared_ptr<spdlog::logger> &log, const std::string &name, size_t levelZeroToSix, bool timestamp) {
     if(spdlog::get(name) == nullptr) {
-        log = spdlog::stdout_color_st(name, spdlog::color_mode::always);
+        log = spdlog::stdout_color_mt(name, spdlog::color_mode::always);
         //            log = spdlog::stdout_color_mt(name);
 
         if(timestamp) {
@@ -43,17 +43,17 @@ void tools::logger::setLogger(std::shared_ptr<spdlog::logger> &log, const std::s
 
 std::shared_ptr<spdlog::logger> tools::logger::setLogger(const std::string &name, size_t levelZeroToSix, bool timestamp) {
     if(spdlog::get(name) == nullptr) {
-        auto log = spdlog::stdout_color_st(name, spdlog::color_mode::always);
+        auto log_ = spdlog::stdout_color_mt(name, spdlog::color_mode::always);
 
         //            auto log = spdlog::stdout_color_mt(name);
 
         if(timestamp) {
-            enableTimeStamp(log);
+            enableTimeStamp(log_);
         } else {
-            disableTimeStamp(log);
+            disableTimeStamp(log_);
         }
-        setLogLevel(log, levelZeroToSix);
-        return log;
+        setLogLevel(log_, levelZeroToSix);
+        return log_;
     } else {
         return spdlog::get(name);
     }

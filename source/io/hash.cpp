@@ -9,8 +9,10 @@
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 #include <string>
+#include <tid/tid.h>
 namespace tools::hash {
     std::string sha256_file(const std::string &fn) {
+        auto          t_scope = tid::tic_scope(__FUNCTION__);
         std::ifstream file(fn, std::ios::binary);
         if(file.is_open()) {
             std::array<char, 524288> buf = {};
@@ -35,6 +37,7 @@ namespace tools::hash {
     }
 
     std::string md5_file(const std::string &fn) {
+        auto          t_scope = tid::tic_scope(__FUNCTION__);
         std::ifstream file(fn, std::ios::binary);
         if(file.is_open()) {
             std::array<char, 524288> buf = {};
@@ -59,6 +62,8 @@ namespace tools::hash {
     }
 
     std::string md5_string(const std::string &str) {
+        auto t_scope = tid::tic_scope(__FUNCTION__);
+
         MD5_CTX md5;
         MD5_Init(&md5);
         MD5_Update(&md5, str.data(), str.size());
@@ -70,13 +75,16 @@ namespace tools::hash {
         return std::string(out.begin(), out.end());
     }
 
-    std::string md5_file_meta(const h5pp::fs::path &fpath, const std::string &more_meta) {
+    std::string std_hash(const std::string &str) { return std::to_string(std::hash<std::string>{}(str)); }
+
+    std::string hash_file_meta(const h5pp::fs::path &fpath, const std::string &more_meta) {
+        auto t_scope = tid::tic_scope(__FUNCTION__);
         std::string meta;
         meta.reserve(512);
         meta += fpath.string() + '\n';
         meta += std::to_string(h5pp::fs::last_write_time(fpath).time_since_epoch().count()) + '\n';
         if(not more_meta.empty()) meta += more_meta + '\n';
-        return std::to_string(std::hash<std::string>{}(meta));
+        return std_hash(meta);
         //        return md5_string(meta);
     }
 

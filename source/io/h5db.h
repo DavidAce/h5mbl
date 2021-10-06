@@ -75,7 +75,8 @@ namespace tools::h5db {
         std::unordered_map<std::string, FileId>                  file;
         std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>  dset;
         std::unordered_map<std::string, InfoId<h5pp::TableInfo>> table;
-        std::unordered_map<std::string, InfoId<h5pp::TableInfo>> crono;
+//        std::unordered_map<std::string, InfoId<h5pp::TableInfo>> crono;
+        std::unordered_map<std::string, InfoId<BufferedTableInfo>> crono;
         std::unordered_map<std::string, InfoId<h5pp::TableInfo>> model;
 
         void clear(){

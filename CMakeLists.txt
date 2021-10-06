@@ -28,11 +28,18 @@ add_executable(${PROJECT_NAME}
         source/general/class_tic_toc.cpp
         source/general/human.cpp
         source/debug/stacktrace.cpp
+        source/tid/tid.cpp
+        source/tid/token.cpp
+        source/tid/ur.cpp
+        source/mpi/mpi-tools.cpp
         )
 target_include_directories(${PROJECT_NAME} PRIVATE source)
 
 # Enable C++17
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
+
+find_package(MPI COMPONENTS CXX REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE MPI::MPI_CXX)
 
 # Set some compiler flags
 include(cmake/CompilerFlags.cmake)
@@ -83,7 +90,7 @@ else ()
     # Download Conan-CMake integration automatically, you can also just copy the conan.cmake file
     if (NOT EXISTS "${CMAKE_BINARY_DIR}/conan.cmake")
         message(STATUS "Downloading conan.cmake from https://github.com/conan-io/cmake-conan")
-        file(DOWNLOAD "https://github.com/conan-io/cmake-conan/raw/v0.15/conan.cmake"
+        file(DOWNLOAD "https://github.com/conan-io/cmake-conan/raw/v0.16.1/conan.cmake"
                 "${CMAKE_BINARY_DIR}/conan.cmake")
     endif ()
 
@@ -108,12 +115,12 @@ else ()
             CONANFILE conanfile.txt
             BUILD_TYPE ${CMAKE_BUILD_TYPE}
             BASIC_SETUP CMAKE_TARGETS
-            BUILD missing)
+            BUILD missing
+    )
 endif ()
 
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${CONAN_TARGETS})
-
 
 # Print summary of CMake configuration
 include(cmake/PrintTargetInfo.cmake)

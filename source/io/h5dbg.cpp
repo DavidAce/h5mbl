@@ -1,8 +1,10 @@
 #include "h5dbg.h"
+#include <tid/tid.h>
 
 
 
 std::string tools::h5dbg::get_hid_string_details(const hid_t & id){
+    auto        t_scope  = tid::tic_scope(__FUNCTION__);
     auto hid_type = H5Iget_type(id);
     std::string msg = fmt::format("id {}: ",id);
     switch(hid_type){

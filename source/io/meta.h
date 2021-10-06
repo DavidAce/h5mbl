@@ -41,5 +41,3 @@ struct ModelKey {
     std::string key;
     ModelKey(std::string_view algo_, std::string_view model_, std::string_view name_) : algo(algo_), model(model_), name(name_) {}
 };
-
-
