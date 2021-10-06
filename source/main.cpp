@@ -274,7 +274,6 @@ int main(int argc, char *argv[]) {
             std::atexit(clean_up);
             std::at_quick_exit(clean_up);
         }
-        MPI_Barrier(MPI_COMM_WORLD);
 
         // Load database
         tools::h5db::TgtDb tgtdb;
@@ -287,7 +286,6 @@ int main(int argc, char *argv[]) {
         tgtdb.model = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.models);
         h5_tgt.setKeepFileClosed();
 
-        MPI_Barrier(MPI_COMM_WORLD);
 
         uintmax_t srcBytes = 0;
         uintmax_t tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
@@ -297,8 +295,6 @@ int main(int argc, char *argv[]) {
         std::vector<h5pp::fs::path> h5files;
         copy(h5iter(h5dir), h5iter(), back_inserter(h5files));
         std::sort(h5files.begin(), h5files.end());
-
-        MPI_Barrier(MPI_COMM_WORLD);
         tools::logger::log->info("num h5files: {}", h5files.size());
         // No barriers from now on: There can be a different number of files in h5files!
         for(const auto &src_item : h5files) {
