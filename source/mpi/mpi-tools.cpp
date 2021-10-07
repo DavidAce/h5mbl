@@ -25,6 +25,10 @@ void mpi::finalize() {
     if(world.size > 1 or mpi::on) MPI_Finalize();
 }
 
+void mpi::barrier() {
+    if(world.size > 1 or mpi::on) MPI_Barrier(MPI_COMM_WORLD);
+}
+
 void mpi::scatter(std::vector<h5pp::fs::path> &data, int src) {
     if(world.size == 1) return; // No need to scatter
 

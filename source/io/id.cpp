@@ -18,17 +18,21 @@ void BufferedTableInfo::insert(const std::vector<std::byte> &entry, size_t index
     if(entry.size() != info->recordBytes.value()) throw std::runtime_error("insert: record and entry size mismatch");
     if(recordBuffer.size() >= maxRecords) flush();
 
-//    h5pp::print("Inserting 1 records at index {} into {}\n", index, info->tablePath.value() );
     // We need to find out if there is already a contigous buffer where we can append this entry. If not, we start a new contiguous buffer
     for(auto &r : recordBuffer){
-        if(r.offset + r.extent + 1 == index){
+        if(r.offset + r.extent == index){
             r.rawdata.insert(r.rawdata.end(), entry.begin(), entry.end());
             r.extent += 1;
+            h5pp::print("Inserting 1 records at index {} into offset {} extent {}\n", index, r.offset, r.extent );
+
             return;
         }
     }
     // None was found, so we make a new one
     recordBuffer.emplace_back(ContiguousBuffer{index, 1ul, entry});
+    auto & r = recordBuffer.back();
+    h5pp::print("Inserting 1 records at index {} into offset {} extent {}\n",  index, r.offset, r.extent );
+
 }
 
 
@@ -36,7 +40,7 @@ void BufferedTableInfo::flush() {
     if (recordBuffer.empty()) return;
     if(info == nullptr) throw std::runtime_error("flush: info is nullptr");
 //    std::vector<std::byte> readData;
-//    h5pp::print("Flushing table {}\n", info->tablePath.value());
+    h5pp::logger::setLogLevel(0);
     for(const auto & r : recordBuffer){
         h5pp::hdf5::writeTableRecords(r.rawdata, *info, r.offset, r.extent);
 

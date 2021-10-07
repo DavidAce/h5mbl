@@ -21,7 +21,7 @@ struct BufferedTableInfo {
     public:
     h5pp::TableInfo *info = nullptr;
     std::vector<ContiguousBuffer> recordBuffer;
-    size_t maxRecords = 500;
+    size_t maxRecords = 1000;
 
     BufferedTableInfo();
     BufferedTableInfo(h5pp::TableInfo *info_);

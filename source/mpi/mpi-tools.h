@@ -28,6 +28,7 @@ namespace mpi {
     inline comm world;
     void        init();
     void        finalize();
+    void        barrier();
     template<typename T>
     [[nodiscard]] constexpr MPI_Datatype get_dtype() noexcept {
         MPI_Datatype mpi_type = MPI_DATATYPE_NULL;

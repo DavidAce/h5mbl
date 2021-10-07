@@ -2,6 +2,7 @@
 #include <general/enums.h>
 #include <general/prof.h>
 #include <h5pp/h5pp.h>
+#include <io/h5dbg.h>
 #include <io/id.h>
 #include <io/logger.h>
 #include <io/meta.h>
@@ -113,18 +114,16 @@ namespace tools::h5db {
 
     template<typename InfoType>
     void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<InfoType>> &infoDb) {
-        auto t_scope = tid::tic_scope(__FUNCTION__);
+        auto                           t_scope = tid::tic_scope(__FUNCTION__);
         std::optional<h5pp::DataInfo>  dataInfoKey;
         std::optional<h5pp::DataInfo>  dataInfoPath;
         std::optional<h5pp::AttrInfo>  attrInfoKey;
         std::optional<h5pp::AttrInfo>  attrInfoPath;
         std::optional<h5pp::TableInfo> tableInfo;
 
+        auto keepOpen = h5_tgt.getFileHandleToken();
 
-        h5_tgt.setKeepFileOpened();
         for(const auto &[infoKey, infoId] : infoDb) {
-            tools::logger::log->info("Saving database infoKey {} | InfoType {} | infoId {} | infoDb.size() {}", infoKey, type::sfinae::type_name<InfoType>(), type::sfinae::type_name<decltype(infoId)>(), infoDb.size());
-
             std::vector<SeedId> seedIdxVec;
             for(const auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
             auto sorter = [](auto &lhs, auto &rhs) {
@@ -162,8 +161,10 @@ namespace tools::h5db {
                     clearInfo(dataInfoPath);
                     attrInfoKey->linkPath  = tgtDbPath;
                     attrInfoPath->linkPath = tgtDbPath;
+
                     h5_tgt.writeAttribute(infoKey, dataInfoKey.value(), attrInfoKey.value());
                     h5_tgt.writeAttribute(tgtPath.string(), dataInfoPath.value(), attrInfoPath.value());
+
                 } else {
                     attrInfoKey  = h5_tgt.writeAttribute(infoKey, "key", tgtDbPath);
                     attrInfoPath = h5_tgt.writeAttribute(tgtPath.string(), "path", tgtDbPath);
@@ -172,7 +173,6 @@ namespace tools::h5db {
             if(seedIdxVec.empty()) continue;
             h5_tgt.writeTableRecords(seedIdxVec, tgtDbPath);
         }
-        h5_tgt.setKeepFileClosed();
     }
     template void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::DsetInfo>> &infoDb);
     template void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &infoDb);
