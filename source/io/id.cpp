@@ -4,7 +4,7 @@
 #include <tid/tid.h>
 
 BufferedTableInfo::BufferedTableInfo() = default;
-BufferedTableInfo::BufferedTableInfo(h5pp::TableInfo *info_) : info(info_) { buffer.reserve(info->recordBytes.value() * info->chunkDims.value()[0]); }
+BufferedTableInfo::BufferedTableInfo(h5pp::TableInfo *info_) : info(info_) {}
 BufferedTableInfo &BufferedTableInfo::operator=(h5pp::TableInfo *info_) {
     // Guard self assignment
     if(info == info_) return *this;
@@ -16,60 +16,42 @@ BufferedTableInfo::~BufferedTableInfo() { flush(); }
 void BufferedTableInfo::insert(const std::vector<std::byte> &entry, size_t index) {
     if(info == nullptr) throw std::runtime_error("insert: info is nullptr");
     if(entry.size() != info->recordBytes.value()) throw std::runtime_error("insert: record and entry size mismatch");
+    if(recordBuffer.size() >= maxRecords) flush();
+
 //    h5pp::print("Inserting 1 records at index {} into {}\n", index, info->tablePath.value() );
-    if(bufferedRecords.size() >= maxRecords) flush();
-    size_t offset  = index * info->recordBytes.value();
-    size_t minsize = offset + entry.size();
-    if(buffer.size() < minsize) buffer.resize(minsize);
-    std::copy(std::begin(entry), std::end(entry), buffer.data() + offset);
-    bufferedRecords.insert(index);
-//    h5pp::print("buffered records: {}\n", bufferedRecords);
-}
-
-void BufferedTableInfo::flush() {
-    if(info == nullptr) throw std::runtime_error("flush: info is nullptr");
-//    h5pp::print("Flushing {} records into {}\n", bufferedRecords.size(), info->tablePath.value());
-    // Now we write the data to file
-    // The problem is the buffer may point to discontiguous set of indices, anywhere on the table.
-    std::deque<size_t> buffRecs(bufferedRecords.begin(), bufferedRecords.end());
-    //    h5pp::print("buffered records: {}\n", buffRecs);
-
-    while(not buffRecs.empty()) {
-        size_t offset = buffRecs.front();
-        size_t extent = 0;
-        // Find a contiguous sequence of indices
-        for(const auto &b : buffRecs) {
-            if(b - offset <= extent + 1)
-                extent++;
-            else
-                break;
-        }
-
-//        h5pp::print("Flushing offset {} extent {}\n", offset,extent);
-        if constexpr(h5pp::ndebug)
-            if(extent == 0) throw std::logic_error("Extent == 0");
-
-        // The offset and extent defines a set of entries that are contiguous in memory. These can be written in one go.
-        // If we are lucky, this is the whole buffer in one go. If not,
-        bool wholebuffer = offset == 0 and extent == buffRecs.size();
-        if(wholebuffer) {
-            h5pp::hdf5::writeTableRecords(buffer, *info, offset, extent);
-            buffRecs.clear();
-            break;
-        } else {
-            // In this case offset and extent define a portion of the whole buffer.
-            // We need to copy  that portion into a fresh buffer
-            tmpbuffer.reserve(extent);
-            tmpbuffer.resize(extent);
-            std::copy_n(buffer.data() + offset, extent, tmpbuffer.data());
-            h5pp::hdf5::writeTableRecords(tmpbuffer, *info, offset, extent);
-            buffRecs.erase(buffRecs.begin(), buffRecs.begin() + static_cast<long>(extent));
+    // We need to find out if there is already a contigous buffer where we can append this entry. If not, we start a new contiguous buffer
+    for(auto &r : recordBuffer){
+        if(r.offset + r.extent + 1 == index){
+            r.rawdata.insert(r.rawdata.end(), entry.begin(), entry.end());
+            r.extent += 1;
+            return;
         }
     }
-
-    bufferedRecords.clear();
-    buffer.clear();
+    // None was found, so we make a new one
+    recordBuffer.emplace_back(ContiguousBuffer{index, 1ul, entry});
 }
+
+
+void BufferedTableInfo::flush() {
+    if (recordBuffer.empty()) return;
+    if(info == nullptr) throw std::runtime_error("flush: info is nullptr");
+//    std::vector<std::byte> readData;
+//    h5pp::print("Flushing table {}\n", info->tablePath.value());
+    for(const auto & r : recordBuffer){
+        h5pp::hdf5::writeTableRecords(r.rawdata, *info, r.offset, r.extent);
+
+//        h5pp::hdf5::readTableRecords(readData, *info, r.offset, r.extent);
+//        if(readData != r.rawdata){
+//            h5pp::print("raw  data\n{}\n", fmt::join(r.rawdata,""));
+//            h5pp::print("read data\n{}\n", fmt::join(readData,""));
+//            throw std::runtime_error("Mismatch data");
+//        }
+    }
+
+
+    recordBuffer.clear();
+}
+
 
 FileId::FileId(long seed_, std::string_view path_, std::string_view hash_) : seed(seed_) {
     strncpy(path, path_.data(), sizeof(path) - 1);
@@ -91,7 +73,7 @@ template struct InfoId<h5pp::DsetInfo>;
 template struct InfoId<h5pp::TableInfo>;
 
 InfoId<BufferedTableInfo>::InfoId(long seed_, long index_) { db[seed_] = index_; }
-InfoId<BufferedTableInfo>::InfoId(const h5pp::TableInfo &info_) : info(info_), buff(&info) {
+InfoId<BufferedTableInfo>::InfoId(const h5pp::TableInfo &info_) : info(info_), buff(BufferedTableInfo(&info)) {
     //    h5pp::print("Copy constructor for buffered table {}\n", info.tablePath.value());
 }
 InfoId<BufferedTableInfo> &InfoId<BufferedTableInfo>::operator=(const h5pp::TableInfo &info_) {

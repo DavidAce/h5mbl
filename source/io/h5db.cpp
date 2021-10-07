@@ -114,16 +114,19 @@ namespace tools::h5db {
     template<typename InfoType>
     void saveDatabase(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<InfoType>> &infoDb) {
         auto t_scope = tid::tic_scope(__FUNCTION__);
-
         std::optional<h5pp::DataInfo>  dataInfoKey;
         std::optional<h5pp::DataInfo>  dataInfoPath;
         std::optional<h5pp::AttrInfo>  attrInfoKey;
         std::optional<h5pp::AttrInfo>  attrInfoPath;
         std::optional<h5pp::TableInfo> tableInfo;
+
+
         h5_tgt.setKeepFileOpened();
-        for(auto &[infoKey, infoId] : infoDb) {
+        for(const auto &[infoKey, infoId] : infoDb) {
+            tools::logger::log->info("Saving database infoKey {} | InfoType {} | infoId {} | infoDb.size() {}", infoKey, type::sfinae::type_name<InfoType>(), type::sfinae::type_name<decltype(infoId)>(), infoDb.size());
+
             std::vector<SeedId> seedIdxVec;
-            for(auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
+            for(const auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
             auto sorter = [](auto &lhs, auto &rhs) {
                 return lhs.seed < rhs.seed;
             };

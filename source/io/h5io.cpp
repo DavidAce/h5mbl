@@ -585,7 +585,6 @@ namespace tools::h5io {
         auto                   t_scope = tid::tic_scope(__FUNCTION__);
         std::vector<std::byte> srcReadBuffer;
         std::vector<size_t>    iters; // We can assume all tables have the same iteration numbers. Only update on mismatch
-
         for(const auto &srcKey : srcCronoKeys) {
             if(srcTableDb.find(srcKey.key) == srcTableDb.end()) throw std::logic_error(h5pp::format("Key [{}] was not found in source map", srcKey.key));
             auto &srcInfo    = srcTableDb[srcKey.key];
@@ -616,7 +615,7 @@ namespace tools::h5io {
                     // Disabling compression is supposed to give a nice speedup. Read here:
                     // https://support.hdfgroup.org/HDF5/doc1.8/Advanced/DirectChunkWrite/UsingDirectChunkWrite.pdf
                     if(not tableInfo.tableExists.value())
-                        tableInfo = h5_tgt.createTable(srcInfo.h5Type.value(), tgtPath, srcInfo.tableTitle.value(),std::nullopt, true);
+                        tableInfo = h5_tgt.createTable(srcInfo.h5Type.value(), tgtPath, srcInfo.tableTitle.value(), std::nullopt, true);
                     //                    h5pp::hdf5::setTableSize(tableInfo, fileStats.files);
                     //        h5pp::hid::h5p dapl = H5Dget_access_plist(tableInfo.h5Dset.value());
                     //        size_t rdcc_nbytes = 4*1024*1024;

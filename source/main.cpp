@@ -75,12 +75,6 @@ void clean_up() {
 }
 
 
-void close_hdf5() {
-    herr_t err = H5close();
-    if(err < 0) printf("H5close returned error %d", err);
-    H5garbage_collect();
-    H5Eprint(H5E_DEFAULT, stderr);
-}
 
 int main(int argc, char *argv[]) {
     // Here we use getopt to parse CLI input
@@ -91,10 +85,10 @@ int main(int argc, char *argv[]) {
     mpi::init();
     // Register termination codes and what to do in those cases
     debug::register_callbacks();
-    std::atexit(close_hdf5);
     if(mpi::world.id == 0) {
         std::atexit(tools::prof::print_profiling);
         std::at_quick_exit(tools::prof::print_profiling);
+        std::atexit(tools::prof::print_mem_usage);
     }
 
     h5pp::fs::path              default_base = h5pp::fs::absolute("/mnt/WDB-AN1500/mbl_transition");

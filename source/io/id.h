@@ -12,13 +12,16 @@
 
 struct BufferedTableInfo {
     private:
-    std::vector<std::byte> tmpbuffer;
+    struct ContiguousBuffer {
+        size_t                 offset = 0; // In table units
+        size_t                 extent = 0; // In table units
+        std::vector<std::byte> rawdata;
+    };
 
     public:
-    h5pp::TableInfo       *info = nullptr;
-    std::vector<std::byte> buffer;
-    std::set<size_t>       bufferedRecords;
-    size_t                 maxRecords = 1000;
+    h5pp::TableInfo *info = nullptr;
+    std::vector<ContiguousBuffer> recordBuffer;
+    size_t maxRecords = 500;
 
     BufferedTableInfo();
     BufferedTableInfo(h5pp::TableInfo *info_);
