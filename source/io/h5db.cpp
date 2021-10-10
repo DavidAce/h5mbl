@@ -29,23 +29,38 @@ namespace tools::h5db {
         auto                                              t_scope = tid::tic_scope(__FUNCTION__);
         std::unordered_map<std::string, InfoId<InfoType>> infoDataBase;
         auto                                              dbGroups = h5_tgt.findGroups(".db");
-        tools::logger::log->info("Found {} groups matching [.db]", dbGroups.size());
+        auto keyword = [&keys](){
+            if(keys.empty()) return std::string{};
+            if constexpr(std::is_same_v<KeyType, ModelKey>) return keys.front().model;
+            else if constexpr(std::is_same_v<KeyType, CronoKey>) return std::string("cronos");
+            else return keys.front().point;
+        };
+
+        auto missing = [keyword](const std::string &group) {
+            if(keyword().empty()) return true;
+            return group.find(keyword()) == std::string::npos;
+        };
+
+        dbGroups.erase(std::remove_if(dbGroups.begin(), dbGroups.end(), missing), dbGroups.end());
+
+        tools::logger::log->info("Found {} databases for {}", dbGroups.size(), keyword());
 
         for(auto &dbGroup : dbGroups) {
             // Find table databases
-            tools::logger::log->info("Loading databases in {}", dbGroup);
+            tools::logger::log->trace("Scanning databases in {}", dbGroup);
             for(auto &key : keys) {
                 std::vector<std::string> dbNames;
-                tools::logger::log->trace("-- Searching for database");
+                tools::logger::log->trace("-- Searching for database [{}] in group: [{}]", key.name, dbGroup);
                 dbNames = h5_tgt.findDatasets(key.name, dbGroup, -1, 0);
-                tools::logger::log->trace("-- Found database names {}", dbNames);
                 if(dbNames.empty()) continue;
                 if(dbNames.size() > 1) throw std::logic_error(h5pp::format("Found multiple seed databases: {}", dbNames));
+                tools::logger::log->trace("-- Found databases: {}", dbNames);
+
                 // Now we have to load our database, which itself is a table with fields [seed,index].
                 // It also has a [key] attribute so that we can place it in our map, as well as a [path]
                 // attribute to find the actual table
                 auto dbPath = h5pp::format("{}/{}", dbGroup, dbNames.front());
-                tools::logger::log->trace("-- Loading database {}", dbPath);
+                tools::logger::log->debug("Loading database {}", dbPath);
                 auto seedIdDb = h5_tgt.readTableRecords<std::vector<SeedId>>(dbPath);
                 auto infoKey  = h5_tgt.readAttribute<std::string>("key", dbPath);
                 auto infoPath = h5_tgt.readAttribute<std::string>("path", dbPath);
@@ -53,9 +68,13 @@ namespace tools::h5db {
                     infoDataBase[infoKey] = h5_tgt.getDatasetInfo(infoPath);
                 else if constexpr(std::is_same_v<InfoType, h5pp::TableInfo>)
                     infoDataBase[infoKey] = h5_tgt.getTableInfo(infoPath);
+                else if constexpr(std::is_same_v<InfoType, BufferedTableInfo>)
+                    infoDataBase[infoKey] = h5_tgt.getTableInfo(infoPath);
+                else
+                    throw std::runtime_error(h5pp::format("Could not match InfoType: [{}]", type::sfinae::type_name<InfoType>()));
                 auto &infoId = infoDataBase[infoKey];
                 // We can now load the seed/index database it into the map
-                for(auto &seedId : seedIdDb) infoId.db[seedId.seed] = seedId.index;
+                for(auto &seedId : seedIdDb) infoId.insert(seedId.seed, seedId.index);
             }
         }
 
@@ -64,7 +83,6 @@ namespace tools::h5db {
 
     template std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>    loadDatabase(const h5pp::File &h5_tgt, const std::vector<DsetKey> &keys);
     template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>   loadDatabase(const h5pp::File &h5_tgt, const std::vector<TableKey> &keys);
-    template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>   loadDatabase(const h5pp::File &h5_tgt, const std::vector<CronoKey> &keys);
     template std::unordered_map<std::string, InfoId<BufferedTableInfo>> loadDatabase(const h5pp::File &h5_tgt, const std::vector<CronoKey> &keys);
     template std::unordered_map<std::string, InfoId<h5pp::TableInfo>>   loadDatabase(const h5pp::File &h5_tgt, const std::vector<ModelKey> &keys);
 
@@ -120,12 +138,16 @@ namespace tools::h5db {
         std::optional<h5pp::AttrInfo>  attrInfoKey;
         std::optional<h5pp::AttrInfo>  attrInfoPath;
         std::optional<h5pp::TableInfo> tableInfo;
+        {
+            for(const auto &[infoKey, infoId] : infoDb) infoId.info.assertReadReady();
+        }
 
         auto keepOpen = h5_tgt.getFileHandleToken();
 
         for(const auto &[infoKey, infoId] : infoDb) {
+            if(not infoId.db_modified()) continue;
             std::vector<SeedId> seedIdxVec;
-            for(const auto &[seed, index] : infoId.db) { seedIdxVec.emplace_back(SeedId{seed, index}); }
+            for(const auto &[seed, index] : infoId.get_db()) { seedIdxVec.emplace_back(SeedId{seed, index}); }
             auto sorter = [](auto &lhs, auto &rhs) {
                 return lhs.seed < rhs.seed;
             };
@@ -142,7 +164,7 @@ namespace tools::h5db {
             std::string tgtName   = tgtPath.filename();
             std::string tgtGroup  = tgtPath.parent_path();
             std::string tgtDbPath = h5pp::format("{}/.db/{}", tgtGroup, tgtName);
-            tools::logger::log->debug("Writing database: {}", tgtDbPath);
+            tools::logger::log->debug("Saving database: {}", tgtDbPath);
             if(not h5_tgt.linkExists(tgtDbPath)) {
                 H5T_SeedId::register_table_type();
                 if(tableInfo) {

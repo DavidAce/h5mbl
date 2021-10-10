@@ -1,3 +1,4 @@
+#include <CLI/CLI.hpp>
 #include <cstdlib>
 #include <debug/stacktrace.h>
 #include <general/class_tic_toc.h>
@@ -21,7 +22,6 @@
 #include <omp.h>
 #include <string>
 #include <tid/tid.h>
-
 void print_usage() {
     std::printf(
         R"(
@@ -79,18 +79,9 @@ int main(int argc, char *argv[]) {
     // Here we use getopt to parse CLI input
     // Note that CLI input always override config-file values
     // wherever they are found (config file, h5 file)
-    auto t_h5mbl       = tid::tic_scope("h5mbl");
     tools::logger::log = tools::logger::setLogger("h5mbl", 2);
-    mpi::init();
-    // Register termination codes and what to do in those cases
-    debug::register_callbacks();
-    if(mpi::world.id == 0) {
-        std::atexit(tools::prof::print_profiling);
-        std::at_quick_exit(tools::prof::print_profiling);
-        std::atexit(tools::prof::print_mem_usage);
-    }
 
-    h5pp::fs::path              default_base = h5pp::fs::absolute("/mnt/WDB-AN1500/mbl_transition");
+    h5pp::fs::path              base_dir = h5pp::fs::absolute("/mnt/WDB-AN1500/mbl_transition");
     std::vector<h5pp::fs::path> src_dirs;
     std::string                 src_out  = "output";
     std::string                 tgt_file = "merged.h5";
@@ -101,60 +92,127 @@ int main(int argc, char *argv[]) {
     bool                        use_tmp        = false;
     size_t                      verbosity      = 2;
     size_t                      verbosity_h5pp = 2;
-    size_t                      max_files      = std::numeric_limits<size_t>::max();
-    size_t                      max_dirs       = std::numeric_limits<size_t>::max();
+    size_t                      max_files      = 0ul;
+    size_t                      max_dirs       = 0ul;
     long                        seed_min       = 0l;
     long                        seed_max       = std::numeric_limits<long>::max();
     Model                       model          = Model::SDUAL;
     bool                        replace        = false;
+    std::vector<std::string>    incfilter      = {};
+    std::vector<std::string>    excfilter      = {};
+    {
+        using namespace h5pp;
+        using namespace spdlog;
+        CLI::App app;
+        app.description("h5mbl: Merges simulation data for fLBIT and xDMRG projects");
+        app.get_formatter()->column_width(80);
+        app.option_defaults()->always_capture_default();
+        std::map<std::string, Model>                           ModelMap{{"sdual", Model::SDUAL}, {"lbit", Model::LBIT}};
+        std::vector<std::pair<std::string, LogLevel>>          h5ppLevelMap{{"trace", LogLevel::trace}, {"debug", LogLevel::debug}, {"info", LogLevel::info}};
+        std::vector<std::pair<std::string, level::level_enum>> SpdlogLevelMap{{"trace", level::trace}, {"debug", level::debug}, {"info", level::info}};
 
-    while(true) {
-        char opt = static_cast<char>(getopt(argc, argv, "hb:d:flm:M:n:o:rs:t:Tv:V:"));
-        if(opt == EOF) break;
-        if(optarg == nullptr)
-            tools::logger::log->info("Parsing input argument: -{}", opt);
-        else
-            tools::logger::log->info("Parsing input argument: -{} {}", opt, optarg);
-        switch(opt) {
-            case 'b': default_base = h5pp::fs::canonical(optarg); continue;
-            case 'd': max_dirs = std::strtoul(optarg, nullptr, 10); continue;
-            case 'f': finished = true; continue;
-            case 'l': link_only = true; continue;
-            case 'm': max_files = std::strtoul(optarg, nullptr, 10); continue;
-            case 'M': model = str2enum<Model>(std::string_view(optarg)); continue;
-            case 'n': tgt_file = std::string(optarg); continue;
-            case 'o': src_out = std::string(optarg); continue;
-            case 'r': replace = true; continue;
-            case 's': {
-                h5pp::fs::path src_dir = optarg;
-                if(src_dir.is_relative()) {
-                    auto matching_dirs = tools::io::find_dir<false>(default_base, src_dir.string(), src_out);
-                    if(matching_dirs.size() > 5) {
-                        std::string error_msg = h5pp::format("Too many directories match the pattern {}:\n", (default_base / src_dir).string());
-                        for(auto &dir : matching_dirs) error_msg.append(dir.string() + "\n");
-                        throw std::runtime_error(error_msg);
-                    }
-                    if(matching_dirs.empty()) throw std::runtime_error(h5pp::format("No directories match the pattern: {}", (default_base / src_dir).string()));
-                    for(auto &match : matching_dirs) src_dirs.emplace_back(match);
-                } else
-                    src_dirs.emplace_back(h5pp::fs::canonical(src_dir));
-                continue;
-            }
-            case 't': tgt_dir = h5pp::fs::absolute(optarg); continue;
-            case 'T': use_tmp = true; continue;
-            case 'v': verbosity = std::strtoul(optarg, nullptr, 10); continue;
-            case 'V': verbosity_h5pp = std::strtoul(optarg, nullptr, 10); continue;
-            case ':': throw std::runtime_error(fmt::format("Option -{} needs a value", opt)); break;
-            case 'h':
-            case '?':
-            default: print_usage(); exit(0);
-            case -1: break;
-        }
-        break;
+        /* clang-format off */
+        app.add_option("-M,--model"       , model           , "Choose [sdual|lbit]")->required()->transform(CLI::CheckedTransformer(ModelMap, CLI::ignore_case))->always_capture_default(false);
+        app.add_option("-b,--basedir"     , base_dir        , "The base directory for simulations of MBL transition");
+        app.add_option("-n,--destname"    , tgt_file        , "The destination file name for the merge-file");
+        app.add_option("-t,--destdir"     , tgt_dir         , "The destination directory for the merge-file")->required();
+        app.add_option("-o,--srcout"      , src_out         , "The name of the source directory where simulation files are found");
+        app.add_option("-s,--srcdirs"     , src_dirs        , "List of output directory patterns from where to collect simulation files");
+        app.add_flag  ("-f,--finished"    , finished       , "Require that src file has finished");
+        app.add_flag  ("-l,--linkonly"    , link_only       , "Link only. Make the main file with external links to all the others");
+        app.add_flag  ("-r,--replace"     , replace         , "Replace existing files");
+        app.add_flag  ("-T,--usetemp"     , use_tmp         , "Use temp directory");
+        app.add_option("--maxfiles"       , max_files       , "Maximum number of .h5 files to collect in each set");
+        app.add_option("--maxdirs"        , max_dirs        , "Maximum number of simulation sets");
+        app.add_option("--maxseed"        , seed_max        , "Maximum seed number to collect");
+        app.add_option("--minseed"        , seed_min        , "Minimum seed number to collect");
+        app.add_option("--inc"            , incfilter       , "Include paths to .h5 matching any in this list");
+        app.add_option("--exc"            , excfilter       , "Exclude paths to .h5 matching any in this list");
+        app.add_option("-v,--log"         , verbosity       , "Log level")->transform(CLI::CheckedTransformer(h5ppLevelMap, CLI::ignore_case));
+        app.add_option("-V,--logh5pp"     , verbosity_h5pp  , "Log level of h5pp")->transform(CLI::CheckedTransformer(h5ppLevelMap, CLI::ignore_case));
+
+        CLI11_PARSE(app, argc, argv);
+        /* clang-format on */
     }
+    tgt_dir = h5pp::fs::absolute(tgt_dir);
+    for(auto &src_dir : src_dirs) {
+        if(src_dir.is_relative()) {
+            auto matching_dirs = tools::io::find_dir<false>(base_dir, src_dir.string(), src_out);
+            if(matching_dirs.size() > 5) {
+                std::string error_msg = h5pp::format("Too many directories match the pattern {}:\n", (base_dir / src_dir).string());
+                for(auto &dir : matching_dirs) error_msg.append(dir.string() + "\n");
+                throw std::runtime_error(error_msg);
+            }
+            if(matching_dirs.empty()) throw std::runtime_error(h5pp::format("No directories match the pattern: {}", (base_dir / src_dir).string()));
+            // We have multiple matches. Append them
+            for(auto &match : matching_dirs) src_dirs.emplace_back(match);
+        } else
+            src_dir = h5pp::fs::canonical(src_dir);
+    }
+    // Now remove elements that do not exist
+    src_dirs.erase(std::remove_if(src_dirs.begin(), src_dirs.end(),
+                                  [](const h5pp::fs::path &p) {
+                                      return not h5pp::fs::exists(p); // put your condition here
+                                  }),
+                   src_dirs.end());
+
+    // Register termination codes and what to do in those cases
+    debug::register_callbacks();
+    if(mpi::world.id == 0) {
+        std::atexit(tools::prof::print_profiling);
+        std::at_quick_exit(tools::prof::print_profiling);
+        std::atexit(tools::prof::print_mem_usage);
+    }
+    auto t_h5mbl = tid::tic_scope("h5mbl");
+    mpi::init();
+
+    //    while(true) {
+    //        char opt = static_cast<char>(getopt(argc, argv, "hb:d:flm:M:n:o:rs:t:Tv:V:"));
+    //        if(opt == EOF) break;
+    //        if(optarg == nullptr)
+    //            tools::logger::log->info("Parsing input argument: -{}", opt);
+    //        else
+    //            tools::logger::log->info("Parsing input argument: -{} {}", opt, optarg);
+    //        switch(opt) {
+    //            case 'b': base_dir = h5pp::fs::canonical(optarg); continue;
+    //            case 'd': max_dirs = std::strtoul(optarg, nullptr, 10); continue;
+    //            case 'f': finished = true; continue;
+    //            case 'l': link_only = true; continue;
+    //            case 'm': max_files = std::strtoul(optarg, nullptr, 10); continue;
+    //            case 'M': model = str2enum<Model>(std::string_view(optarg)); continue;
+    //            case 'n': tgt_file = std::string(optarg); continue;
+    //            case 'o': src_out = std::string(optarg); continue;
+    //            case 'r': replace = true; continue;
+    //            case 's': {
+    //                h5pp::fs::path src_dir = optarg;
+    //                if(src_dir.is_relative()) {
+    //                    auto matching_dirs = tools::io::find_dir<false>(base_dir, src_dir.string(), src_out);
+    //                    if(matching_dirs.size() > 5) {
+    //                        std::string error_msg = h5pp::format("Too many directories match the pattern {}:\n", (base_dir / src_dir).string());
+    //                        for(auto &dir : matching_dirs) error_msg.append(dir.string() + "\n");
+    //                        throw std::runtime_error(error_msg);
+    //                    }
+    //                    if(matching_dirs.empty()) throw std::runtime_error(h5pp::format("No directories match the pattern: {}", (base_dir /
+    //                    src_dir).string())); for(auto &match : matching_dirs) src_dirs.emplace_back(match);
+    //                } else
+    //                    src_dirs.emplace_back(h5pp::fs::canonical(src_dir));
+    //                continue;
+    //            }
+    //            case 't': tgt_dir = h5pp::fs::absolute(optarg); continue;
+    //            case 'T': use_tmp = true; continue;
+    //            case 'v': verbosity = std::strtoul(optarg, nullptr, 10); continue;
+    //            case 'V': verbosity_h5pp = std::strtoul(optarg, nullptr, 10); continue;
+    //            case ':': throw std::runtime_error(fmt::format("Option -{} needs a value", opt)); break;
+    //            case 'h':
+    //            case '?':
+    //            default: print_usage(); exit(0);
+    //            case -1: break;
+    //        }
+    //        break;
+    //    }
     tools::logger::setLogLevel(tools::logger::log, verbosity);
     tools::logger::log->info("Started h5mbl from directory {}", h5pp::fs::current_path());
-    if(src_dirs.empty()) { src_dirs.emplace_back(h5pp::fs::canonical(default_base / src_out)); }
+    if(src_dirs.empty()) { src_dirs.emplace_back(h5pp::fs::canonical(base_dir / src_out)); }
     if(src_dirs.empty()) throw std::runtime_error("Source directories are required. Pass -s <dirpath> (one or more times)");
     for(auto &src_dir : src_dirs) {
         if(not h5pp::fs::is_directory(src_dir)) throw std::runtime_error(fmt::format("Given source is not a directory: {}", src_dir.string()));
@@ -206,13 +264,13 @@ int main(int argc, char *argv[]) {
 
                 // A table records data from the last time step
                 keys.tables.emplace_back(TableKey("fLBIT", "state_*", "tables", "status"));
-                //                keys.tables.emplace_back(TableKey("fLBIT", "state_*", "tables", "mem_usage"));
+                keys.tables.emplace_back(TableKey("fLBIT", "state_*", "tables", "mem_usage"));
                 // A crono records data from each time step
                 keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "measurements"));
-                //                keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "bond_dimensions"));        // Available in v2
-                //                keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "entanglement_entropies")); // Available in v2
-                //                keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "number_entropies"));       // Available in v2
-                //                keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "truncation_errors"));      // Available in v2
+                keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "bond_dimensions"));        // Available in v2
+                keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "entanglement_entropies")); // Available in v2
+                keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "number_entropies"));       // Available in v2
+                keys.cronos.emplace_back(CronoKey("fLBIT", "state_*", "tables", "truncation_errors"));      // Available in v2
 
                 //            keys.dsets.emplace_back(DsetKey("fLBIT", "state_*", "finished", "schmidt_midchain", Size::VAR, Type::COMPLEX));
                 //            keys.dsets.emplace_back(DsetKey("fLBIT", "state_*", "finished/profiling", "fLBIT.run", Size::FIX, Type::TID));
@@ -222,17 +280,15 @@ int main(int argc, char *argv[]) {
         }
 
         // Open the target file
-        auto h5dirs = tools::io::find_h5_dirs(src_dirs, max_dirs);
+        auto h5dirs = tools::io::find_h5_dirs(src_dirs, max_dirs, incfilter, excfilter);
         tools::logger::log->info("num h5dirs: {}", h5dirs.size());
         std::unordered_map<std::string, FileStats> file_stats;
-
+        uintmax_t                                  srcBytes = 0; // Count the total size of scanned files
         for(const auto &h5dir : h5dirs) {
             // Define a new target h5file for the files in this h5dir
             auto h5dir_hash  = tools::hash::std_hash(h5dir.string());
             auto h5_tgt_path = h5pp::format("{}/{}.{}{}", tgt_dir.string(), h5pp::fs::path(tgt_path).stem().string(), tools::hash::std_hash(h5dir.string()),
                                             h5pp::fs::path(tgt_path).extension().string());
-
-            tools::logger::log->info("will create file {}", h5_tgt_path);
 
             // Initialize file
             //        auto plists = h5pp::defaultPlists;
@@ -242,7 +298,19 @@ int main(int argc, char *argv[]) {
             //        herr_t ers    = H5Pset_file_space_strategy(plists.fileCreate, H5F_FSPACE_STRATEGY_PAGE, true, 1);
             //        herr_t erp =    H5Pset_file_space_page_size(plists.fileCreate,100 * 1024);
             //        herr_t erb    = H5Pset_page_buffer_size(plists.fileAccess, 10 * 1024 * 1024, 1, 1);
-            auto h5_tgt = h5pp::File(h5_tgt_path, perm, verbosity_h5pp);
+            auto h5_tgt = h5pp::File();
+
+            try{
+                h5_tgt = h5pp::File(h5_tgt_path, perm, verbosity_h5pp);
+
+            }catch (const std::exception & ex){
+                H5Eprint(H5E_DEFAULT, stderr);
+                tools::logger::log->error("Error opening target file: {}", ex.what());
+                tools::logger::log->error("Replacing broken file: [{}]: {}", h5_tgt_path);
+                h5_tgt = h5pp::File(h5_tgt_path, h5pp::FilePermission::REPLACE, verbosity_h5pp);
+            }
+
+//            auto h5_tgt = h5pp::File(h5_tgt_path, perm, verbosity_h5pp);
             tools::h5dbg::assert_no_dangling_ids(h5_tgt, __FUNCTION__, __LINE__); // Check that there are no open HDF5 handles
             //        hsize_t fsp_size; size_t pbs_size;
             //        H5Pget_file_space_page_size(H5Fget_create_plist(h5_tgt.openFileHandle()), &fsp_size);
@@ -271,7 +339,6 @@ int main(int argc, char *argv[]) {
                 std::atexit(clean_up);
                 std::at_quick_exit(clean_up);
             }
-            tools::h5dbg::assert_no_dangling_ids(h5_tgt, __FUNCTION__, __LINE__); // Check that there are no open HDF5 handles
 
             // Load database
             tools::h5db::TgtDb tgtdb;
@@ -284,10 +351,13 @@ int main(int argc, char *argv[]) {
                 tgtdb.crono   = tools::h5db::loadDatabase<BufferedTableInfo>(h5_tgt, keys.cronos);
                 tgtdb.model   = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.models);
             }
-
-            tools::h5dbg::assert_no_dangling_ids(h5_tgt, __FUNCTION__, __LINE__); // Check that there are no open HDF5 handles
-
-            uintmax_t srcBytes = 0;
+            {
+                for(const auto &[infoKey, infoId] : tgtdb.table) infoId.info.assertReadReady();
+                for(const auto &[infoKey, infoId] : tgtdb.dset) infoId.info.assertReadReady();
+                //                for(const auto &[infoKey, infoId] : tgtdb.model) infoId.info.assertReadReady() ;
+                for(const auto &[infoKey, infoId] : tgtdb.table) infoId.info.assertReadReady();
+                for(const auto &[infoKey, infoId] : tgtdb.crono) infoId.info.assertReadReady();
+            }
             uintmax_t tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
 
             // Collect and sort all the files in h5dir
@@ -325,7 +395,7 @@ int main(int argc, char *argv[]) {
                     // Creeate new entry
                     file_stats[src_base].count = 0;
                     file_stats[src_base].files = h5files.size();
-                } else if(file_stats[src_base].count >= max_files) {
+                } else if(max_files > 0 and file_stats[src_base].count >= max_files) {
                     tools::logger::log->debug("Max files reached in {}: {}", src_base, file_stats[src_base].count);
                     break;
                 }
@@ -342,16 +412,41 @@ int main(int argc, char *argv[]) {
                 }
 
                 FileId fileId(src_seed, src_abs.string(), src_hash);
-
                 // We check if it's in the file database
-                auto status        = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
+                auto status             = tools::h5db::getFileIdStatus(tgtdb.file, fileId);
+                tgtdb.file[fileId.path] = fileId;
+
+                // Update file stats
+                file_stats[src_base].elaps = file_stats[src_base].count == 0 ? t_src_item->restart_lap() : t_src_item->get_lap();
+                file_stats[src_base].count++;
+                file_stats[src_base].bytes += h5pp::fs::file_size(src_abs.string());
+
+                // Print file status
+                srcBytes += h5pp::fs::file_size(src_abs.string());
+                tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
+                tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
+
                 auto fmt_grp_bytes = tools::fmtBytes(true, file_stats[src_base].bytes, 1024, 1);
                 auto fmt_src_bytes = tools::fmtBytes(true, srcBytes, 1024, 1);
                 auto fmt_tgt_bytes = tools::fmtBytes(true, tgtBytes, 1024, 1);
                 auto fmt_spd_bytes = fmt::format("{:.1f} files", file_stats[src_base].get_speed());
-                tools::logger::log->info(FMT_STRING("Found file: {} | {} | {} | count {} | src {} ({}) | tgt {} | {}/s"), src_rel.string(), enum2str(status),
-                                         src_hash, file_stats[src_base].count, fmt_grp_bytes, fmt_src_bytes, fmt_tgt_bytes, fmt_spd_bytes);
-                tgtdb.file[fileId.path] = fileId;
+                if(tools::logger::log->level() <= 1) {
+                    tools::logger::log->info(FMT_STRING("Found file: {} | {} | {} | count {} | src {} ({}) | tgt {} | {}/s"), src_rel.string(),
+                                             enum2str(status), src_hash, file_stats[src_base].count, fmt_grp_bytes, fmt_src_bytes, fmt_tgt_bytes,
+                                             fmt_spd_bytes);
+                } else {
+                    static size_t lastcount = 0;
+                    if(file_stats[src_base].count < lastcount) lastcount = 0;
+                    size_t filecounter = file_stats[src_base].count - lastcount;
+                    if(t_h5mbl->get_lap() > 1.0 or file_stats[src_base].count % 1000 == 0 or file_stats[src_base].count == 1 or
+                       file_stats[src_base].count == file_stats[src_base].files) {
+                        tools::logger::log->info(FMT_STRING("Directory {} ({}) | count {} | src {} ({}) | tgt {} | {:.2f}/s"), h5dir.string(),
+                                                 file_stats[src_base].files, file_stats[src_base].count, fmt_grp_bytes, fmt_src_bytes, fmt_tgt_bytes,
+                                                 static_cast<double>(filecounter) / t_h5mbl->restart_lap());
+                        lastcount = file_stats[src_base].count;
+                    }
+                }
+
                 if(status == FileIdStatus::UPTODATE) continue;
 
                 // If we've reached this point we will start reading from h5_src many times.
@@ -363,6 +458,8 @@ int main(int argc, char *argv[]) {
                     // h5_src.setDriver_sec2();
                     //                 h5_src.setDriver_core();
                     // H5Pset_cache(h5_src.plists.fileAccess, 1000, 7919,rdcc_nbytes, 0.0 );
+                    h5_src.setCloseDegree(H5F_close_degree_t::H5F_CLOSE_WEAK); // Delay closing ids related to this file.
+
                 } catch(const std::exception &ex) {
                     tools::logger::log->warn("Skipping broken file: {}\n\tReason: {}\n", src_abs.string(), ex.what());
                     continue;
@@ -380,19 +477,12 @@ int main(int argc, char *argv[]) {
                     tools::logger::log->warn("Skipping file: {}\n\tReason: {}", src_abs.string(), ex.what());
                     continue;
                 }
-                file_stats[src_base].elaps = file_stats[src_base].count == 0 ? t_src_item->restart_lap() : t_src_item->get_lap();
-                file_stats[src_base].count++;
-                file_stats[src_base].bytes += h5pp::fs::file_size(h5_src.getFilePath());
-                srcBytes += h5pp::fs::file_size(h5_src.getFilePath());
-                tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
+
                 t_open.toc();
 
                 {
-                    //                    auto srcFileKeepOpen = h5_src.getFileToken();
-                    //                    auto tgtFileKeepOpen = h5_tgt.getFileToken();
-                    //
-                    //                    h5_src.setKeepFileOpened();
-                    //                    h5_tgt.setKeepFileOpened();
+                    auto tgtKeepOpen = h5_tgt.getFileHandleToken();
+                    auto srcKeepOpen = h5_src.getFileHandleToken();
                     switch(model) {
                         case Model::SDUAL: {
                             tools::h5io::merge<sdual>(h5_tgt, h5_src, fileId, file_stats[src_base], keys, tgtdb);
@@ -403,28 +493,22 @@ int main(int argc, char *argv[]) {
                             break;
                         }
                     }
-                    //                    h5_src.setKeepFileClosed();
-                    //                    h5_tgt.setKeepFileClosed();
                 }
-
                 tools::logger::log->debug("mem[rss {:<.2f}|peak {:<.2f}|vm {:<.2f}]MB | file db size {}", tools::prof::mem_rss_in_mb(),
                                           tools::prof::mem_hwm_in_mb(), tools::prof::mem_vm_in_mb(), tgtdb.file.size());
             }
 
-            tools::h5dbg::print_dangling_ids(h5_tgt, __FUNCTION__, __LINE__); // Print open HDF5 handles
             tools::h5db::saveDatabase(h5_tgt, tgtdb.file);
             tools::h5db::saveDatabase(h5_tgt, tgtdb.model);
             tools::h5db::saveDatabase(h5_tgt, tgtdb.table);
             tools::h5db::saveDatabase(h5_tgt, tgtdb.crono);
             tools::h5db::saveDatabase(h5_tgt, tgtdb.dset);
-            tools::h5dbg::print_dangling_ids(h5_tgt, __FUNCTION__, __LINE__); // Print open HDF5 handles
 
             tgtdb.file.clear();
             tgtdb.model.clear();
             tgtdb.table.clear();
             tgtdb.crono.clear();
             tgtdb.dset.clear();
-            tools::h5dbg::print_dangling_ids(h5_tgt, __FUNCTION__, __LINE__); // Print open HDF5 handles
 
             // TODO: Put the lines below in a "at quick exit" function
             tools::h5io::writeProfiling(h5_tgt);
@@ -436,7 +520,7 @@ int main(int argc, char *argv[]) {
                 h5_tgt.moveFileTo(tools::h5io::tgt_path, h5pp::FilePermission::REPLACE);
             }
 
-            tools::logger::log->info("Results written to file {}", tgt_path.string());
+            tools::logger::log->info("Results written to file {}", h5_tgt_path);
             tools::h5dbg::assert_no_dangling_ids(h5_tgt, __FUNCTION__, __LINE__); // Check that there are no open HDF5 handles
         }
     }
@@ -445,28 +529,22 @@ int main(int argc, char *argv[]) {
 
     // Now id 1 can merge the files into one final file
     if(mpi::world.id == 0) {
-        auto h5_tgt   = h5pp::File(tgt_path, perm, verbosity_h5pp);
+        tools::logger::log->info("Creating main file for external links: {}", tgt_path);
+        auto h5_tgt   = h5pp::File(tgt_path, h5pp::FilePermission::REPLACE, verbosity_h5pp);
         auto tgt_stem = h5pp::fs::path(tgt_file).stem().string();
         auto tgt_algo = model == Model::LBIT ? "fLBIT" : "xDMRG";
         for(const auto &obj : h5pp::fs::directory_iterator(tgt_dir, h5pp::fs::directory_options::follow_directory_symlink)) {
             if(obj.is_regular_file() and obj.path().extension() == ".h5") {
-                tools::logger::log->info("Found file: {}", obj.path().string());
-                tools::logger::log->info("obj.path().filename()              : {}", obj.path().filename());
-                tools::logger::log->info("h5_tgt.getFileName()               : {}", h5_tgt.getFileName());
-                tools::logger::log->info("obj.path().stem()                  : {}", obj.path().stem());
-                tools::logger::log->info("h5pp::fs::path(tgt_file).stem()    : {}", h5pp::fs::path(tgt_file).stem());
-
                 if(obj.path().filename() != tgt_file and obj.path().stem().string().find(tgt_stem) != std::string::npos) {
                     // Found a file that we can link!
-                    tools::logger::log->info("Found linkable file: {}", obj.path().string());
-                    tools::logger::log->info("Relative           : {}", h5pp::fs::relative(obj.path(), tgt_dir));
-                    tools::logger::log->info("Proximate          : {}", h5pp::fs::proximate(obj.path(), tgt_dir));
                     auto h5_ext = h5pp::File(obj.path().string(), h5pp::FilePermission::READONLY, verbosity_h5pp);
                     // Find the path to the algorithm in this external file
                     auto algo_group = h5_ext.findGroups(tgt_algo, "/", 1);
                     if(algo_group.empty())
-                        throw std::runtime_error(h5pp::format("Could not find algo group {} in external file {}", algo_group, obj.path().string()));
+                        throw std::runtime_error(
+                            h5pp::format("Could not find algo group {} in external file {}: [{}]", tgt_algo, obj.path().string(), algo_group));
                     auto tgt_link = h5pp::fs::proximate(obj.path(), tgt_dir);
+                    tools::logger::log->info("Creating external link: {} -> {}", algo_group[0], tgt_link.string());
                     h5_tgt.createExternalLink(tgt_link.string(), algo_group[0], algo_group[0]);
                 }
             }

@@ -13,22 +13,22 @@
 struct BufferedTableInfo {
     private:
     struct ContiguousBuffer {
-        size_t                 offset = 0; // In table units
-        size_t                 extent = 0; // In table units
+        hsize_t                offset = 0; // In table units
+        hsize_t                extent = 0; // In table units
         std::vector<std::byte> rawdata;
     };
 
     public:
-    h5pp::TableInfo *info = nullptr;
+    h5pp::TableInfo              *info = nullptr;
     std::vector<ContiguousBuffer> recordBuffer;
-    size_t maxRecords = 1000;
+    size_t                        maxRecords = 1000;
 
     BufferedTableInfo();
     BufferedTableInfo(h5pp::TableInfo *info_);
     BufferedTableInfo &operator=(h5pp::TableInfo *info_);
     ~BufferedTableInfo();
 
-    void insert(const std::vector<std::byte> &entry, size_t index /* In units of table entries */);
+    void insert(const std::vector<std::byte> &entry, hsize_t index /* In units of table entries */);
     void flush();
 };
 
@@ -55,21 +55,23 @@ struct FileId {
 };
 
 struct lbit {
-    double J1_mean, J2_mean, J3_mean;
-    double J1_wdth, J2_wdth, J3_wdth;
-    double J2_base;
-    size_t J2_span;
-    double f_mixer;
-    size_t u_layer;
+    double                   J1_mean, J2_mean, J3_mean;
+    double                   J1_wdth, J2_wdth, J3_wdth;
+    double                   J2_base;
+    size_t                   J2_span;
+    double                   f_mixer;
+    size_t                   u_layer;
+    std::vector<std::string> fields = {"J1_mean", "J2_mean", "J3_mean", "J1_wdth", "J2_wdth", "J3_wdth", "J2_base", "J2_span", "f_mixer", "u_layer"};
 };
 
 struct sdual {
-    double J_mean;
-    double J_stdv;
-    double h_mean;
-    double h_stdv;
-    double lambda;
-    double delta;
+    double                   J_mean;
+    double                   J_stdv;
+    double                   h_mean;
+    double                   h_stdv;
+    double                   lambda;
+    double                   delta;
+    std::vector<std::string> fields = {"J_mean", "J_stdv", "h_mean", "h_stdv", "lambda", "delta"};
 };
 
 template<typename Param>
@@ -100,29 +102,66 @@ struct PathId {
 
 template<typename InfoType>
 struct InfoId {
-    std::unordered_map<long, long> db;
-    InfoType                       info = InfoType();
-    InfoId()                            = default;
-    InfoId(long seed_, long index_);
+    private:
+    bool                              modified = false;
+    std::unordered_map<long, hsize_t> db;
+
+    public:
+    InfoType info = InfoType();
+    InfoId()      = default;
+    InfoId(long seed_, hsize_t index_);
     InfoId(const InfoType &info_);
+    bool    db_modified() const { return modified; }
+    bool    has_index(long seed) const { return db.find(seed) != db.end(); }
+    hsize_t get_index(long seed) const {
+        auto res = db.find(seed);
+        if(res != db.end())
+            return res->second;
+        else
+            return std::numeric_limits<hsize_t>::max();
+    }
+    void insert(long seed, hsize_t index) {
+        auto res = db.insert({seed, index});
+        if(res.second) modified = true;
+    }
+    [[nodiscard]] const std::unordered_map<long, hsize_t> &get_db() const { return db; }
 };
 
 template<>
 struct InfoId<BufferedTableInfo> {
-    std::unordered_map<long, long> db;
-    h5pp::TableInfo                info = h5pp::TableInfo();
-    BufferedTableInfo              buff = BufferedTableInfo();
-    InfoId()                            = default;
-    InfoId(long seed_, long index_);
+    private:
+    bool                              modified = false;
+    std::unordered_map<long, hsize_t> db;
+
+    public:
+    h5pp::TableInfo   info = h5pp::TableInfo();
+    BufferedTableInfo buff = BufferedTableInfo();
+    InfoId()               = default;
+    InfoId(long seed_, hsize_t index_);
     InfoId(const h5pp::TableInfo &info_);
     InfoId &operator=(const h5pp::TableInfo &info_);
+    bool    db_modified() const { return modified; }
+    bool    has_index(long seed) const { return db.find(seed) != db.end(); }
+    hsize_t get_index(long seed) const {
+        auto res = db.find(seed);
+        if(res != db.end())
+            return res->second;
+        else
+            return std::numeric_limits<hsize_t>::max();
+    }
+    void insert(long seed, hsize_t index) {
+        auto res = db.insert({seed, index});
+        if(res.second) modified = true;
+    }
+
+    [[nodiscard]] const std::unordered_map<long, hsize_t> &get_db() const { return db; }
 };
 
 struct SeedId {
     long seed  = -1;
-    long index = -1;
+    hsize_t index = std::numeric_limits<hsize_t>::max();
     SeedId()   = default;
-    SeedId(long seed_, long index_) : seed(seed_), index(index_) {}
+    SeedId(long seed_, hsize_t index_) : seed(seed_), index(index_) {}
     [[nodiscard]] std::string string() const { return h5pp::format("seed {} | index {}", index, seed); }
 };
 
@@ -140,25 +179,6 @@ class H5T_SeedId {
     static void register_table_type();
 };
 
-// struct H5T_profiling {
-//     public:
-//     static inline h5pp::hid::h5t h5_type;
-//     struct table {
-//         double t_tot = 0;
-//         double t_pre = 0;
-//         double t_itr = 0;
-//         double t_tab = 0;
-//         double t_grp = 0;
-//         double t_get = 0;
-//         double t_dst = 0;
-//         double t_ren = 0;
-//         double t_crt = 0;
-//         double t_ham = 0;
-//         double t_dat = 0;
-//     };
-//     H5T_profiling();
-//     static void register_table_type();
-// };
 
 class H5T_profiling {
     public:

@@ -49,9 +49,9 @@ namespace tools::prof {
         return msg;
     }
     void print_mem_usage() {
-        tools::logger::log->debug("{:<30}{:>10.2f} MB", "Memory RSS", mem_rss_in_mb());
-        tools::logger::log->debug("{:<30}{:>10.2f} MB", "Memory Peak", mem_hwm_in_mb());
-        tools::logger::log->debug("{:<30}{:>10.2f} MB", "Memory Vm", mem_vm_in_mb());
+        tools::logger::log->info("{:<30}{:>10.2f} MB", "Memory RSS", mem_rss_in_mb());
+        tools::logger::log->info("{:<30}{:>10.2f} MB", "Memory Peak", mem_hwm_in_mb());
+        tools::logger::log->info("{:<30}{:>10.2f} MB", "Memory Vm", mem_vm_in_mb());
     }
     void print_mem_usage_oneliner() {
         tools::logger::log->debug("mem[rss {:<.2f}|peak {:<.2f}|vm {:<.2f}]MB ", mem_rss_in_mb(), mem_hwm_in_mb(), mem_vm_in_mb());

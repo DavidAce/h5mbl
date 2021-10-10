@@ -43,13 +43,26 @@ namespace tools::io {
     template std::vector<h5pp::fs::path> find_dir<true>(const h5pp::fs::path &base, const std::string &pattern, const std::string &subdir);
     template std::vector<h5pp::fs::path> find_dir<false>(const h5pp::fs::path &base, const std::string &pattern, const std::string &subdir);
 
-    std::vector<h5pp::fs::path> find_h5_dirs(const std::vector<h5pp::fs::path> &src_dirs, size_t max_dirs) {
+    std::vector<h5pp::fs::path> find_h5_dirs(const std::vector<h5pp::fs::path> &src_dirs, size_t max_dirs, const std::vector<std::string> & inc,  const std::vector<std::string> & exc) {
         auto                        t_scope = tid::tic_scope(__FUNCTION__);
         std::vector<h5pp::fs::path> result;
         if(mpi::world.id == 0) {
             for(const auto &src_dir : src_dirs) {
                 for(const auto &dir : h5pp::fs::recursive_directory_iterator(src_dir, h5pp::fs::directory_options::follow_directory_symlink)) {
                     if(dir.is_directory()) {
+                        // Check that the keys in inc are present in dir
+                        if(not inc.empty()){
+                            bool match = std::any_of(inc.begin(), inc.end(),
+                                                     [&dir](const auto& s){ return dir.path().string().find(s) != std::string::npos; });
+                            if(not match) continue;
+                        }
+                        // Check that the keys in exc are not present in dir
+                        if(not exc.empty()){
+                            bool match = std::any_of(exc.begin(), exc.end(),
+                                                     [&dir](const auto& s){ return dir.path().string().find(s) != std::string::npos; });
+                            if(match) continue;
+                        }
+
                         // Check if this directory it has any .h5 files
                         for(const auto &obj : h5pp::fs::directory_iterator(dir, h5pp::fs::directory_options::follow_directory_symlink)) {
                             if(obj.is_regular_file() and obj.path().extension() == ".h5") {
@@ -57,9 +70,9 @@ namespace tools::io {
                                 break;
                             }
                         }
-                        if (result.size() >= max_dirs) break;
+                        if (max_dirs > 0 and result.size() >= max_dirs) break;
                     }
-                    if (result.size() >= max_dirs) break;
+                    if (max_dirs > 0 and result.size() >= max_dirs) break;
                 }
             }
             std::sort(result.begin(),result.end());

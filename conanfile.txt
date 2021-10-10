@@ -3,6 +3,7 @@ h5pp/1.9.1@davidace/dev
 openssl/1.1.1h@
 spdlog/1.9.2@
 fmt/8.0.1@
+cli11/2.1.1@
 
 [generators]
 cmake

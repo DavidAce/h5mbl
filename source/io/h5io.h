@@ -32,7 +32,7 @@ namespace tools::h5io {
 
     template<typename T>
     void saveModel(const h5pp::File &h5_src, h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
-                   const ModelId<T> &modelId);
+                   const ModelId<T> &modelId, const FileId &fileId);
 
     std::vector<DsetKey>  gatherDsetKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const PathId &pathid,
                                          const std::vector<DsetKey> &srcKeys);

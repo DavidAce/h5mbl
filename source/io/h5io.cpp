@@ -33,10 +33,9 @@ namespace tools::h5io {
             h5_tgt.appendToDataset(data, tgtInfo, 1, {maxrows, 1});
         }
         template<typename T>
-        void copy_dset(h5pp::File &h5_tgt, const h5pp::File &h5_src, h5pp::DsetInfo &tgtInfo, h5pp::DsetInfo &srcInfo, long index) {
+        void copy_dset(h5pp::File &h5_tgt, const h5pp::File &h5_src, h5pp::DsetInfo &tgtInfo, h5pp::DsetInfo &srcInfo, hsize_t index) {
             auto t_scope = tid::tic_scope(__FUNCTION__);
-            auto uindex  = static_cast<size_t>(index);
-            if(uindex >= tgtInfo.dsetDims.value().at(1)) return append_dset<T>(h5_tgt, h5_src, tgtInfo, srcInfo);
+            if(index >= tgtInfo.dsetDims.value().at(1)) return append_dset<T>(h5_tgt, h5_src, tgtInfo, srcInfo);
             auto   data    = h5_src.readDataset<T>(srcInfo);
             size_t maxrows = data.size();
             if(tgtInfo.dsetDims) maxrows = std::min<size_t>(maxrows, tgtInfo.dsetDims.value()[0]);
@@ -45,7 +44,7 @@ namespace tools::h5io {
             tgtInfo.resizePolicy     = h5pp::ResizePolicy::GROW;
             tgtInfo.dsetSlab         = h5pp::Hyperslab();
             tgtInfo.dsetSlab->extent = {maxrows, 1};
-            tgtInfo.dsetSlab->offset = {0, uindex};
+            tgtInfo.dsetSlab->offset = {0, index};
             options.dataDims         = {maxrows, 1};
             h5_tgt.writeDataset(data, tgtInfo, options);
             // Restore previous settings
@@ -203,47 +202,68 @@ namespace tools::h5io {
 
     template<typename T>
     void saveModel([[maybe_unused]] const h5pp::File &h5_src, h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtModelDb,
-                   const ModelId<T> &modelId) {
+                   const ModelId<T> &modelId, const FileId &fileId) {
         auto              t_scope      = tid::tic_scope(__FUNCTION__);
         const std::string tgtModelPath = fmt::format("{}/{}", modelId.basepath, modelId.path);
+
+        tools::logger::log->debug("Attempting to copy model to tgtPath {}", tgtModelPath);
+        tools::logger::log->debug("modelId key    {}", modelId.key);
+        tools::logger::log->debug("modelId path   {}", modelId.path);
+        tools::logger::log->debug("modelId bpath  {}", modelId.basepath);
+        tools::logger::log->debug("modelId fields {}", modelId.p.fields);
+
         if(tgtModelDb.find(tgtModelPath) == tgtModelDb.end()) {
             tgtModelDb[tgtModelPath] = h5_tgt.getTableInfo(tgtModelPath);
+
+            auto &tgtId   = tgtModelDb[tgtModelPath];
+            auto &tgtInfo = tgtModelDb[tgtModelPath].info;
+
             // It doesn't make sense to copy the whole hamiltonian table here:
             // It is specific to a single realization, but here we collect the fields common to all realizations.
-            const auto      &algorithm   = modelId.algorithm;
-            const auto      &hamiltonian = modelId.p;
-            std::string_view basepath    = modelId.basepath;
+            const auto &srcModelInfo = h5_src.getTableInfo(modelId.path); // This will return a TableInfo to a an existing table in the source file
+            auto        modelPath    = fmt::format("{}/{}/model", modelId.basepath, modelId.algorithm); // Generate a new path for the target group
+            auto        tablePath    = fmt::format("{}/hamiltonian", modelPath);                        // Generate a new path for the target table
+
+            // Update an entry of the hamiltonian table with the relevant fields
+            tools::logger::log->trace("Copying model {}", modelId.basepath);
+            auto h5t_model = h5pp::util::getFieldTypeId(srcModelInfo, modelId.p.fields); // Generate a h5t with the relevant fields
+            auto modelData =
+                h5_src.readTableField<std::vector<std::byte>>(srcModelInfo, h5t_model, h5pp::TableSelection::LAST); // Read those fields into a buffer
+            tgtInfo = h5_tgt.createTable(h5t_model, tablePath, h5pp::format("{} Hamiltonian", modelId.algorithm));
+            h5_tgt.writeTableRecords(modelData, tablePath);
+            // Update the database
+            tgtId.insert(fileId.seed, 0);
 
             // Now copy some helpful scalar datasets. This data is available in the attributes of the table above but this is also handy
-            h5_tgt.writeDataset(modelId.model_size, fmt::format("{}/{}/model/model_size", basepath, algorithm));
-            h5_tgt.writeDataset(modelId.model_type, fmt::format("{}/{}/model/model_type", basepath, algorithm));
-            h5_tgt.writeDataset(modelId.distribution, fmt::format("{}/{}/model/distribution", basepath, algorithm));
+            h5_tgt.writeDataset(modelId.model_size, fmt::format("{}/{}/model/model_size", modelId.basepath, modelId.algorithm));
+            h5_tgt.writeDataset(modelId.model_type, fmt::format("{}/{}/model/model_type", modelId.basepath, modelId.algorithm));
+            h5_tgt.writeDataset(modelId.distribution, fmt::format("{}/{}/model/distribution", modelId.basepath, modelId.algorithm));
             if constexpr(std::is_same_v<T, sdual>) {
-                h5_tgt.writeDataset(hamiltonian.J_mean, fmt::format("{}/{}/model/J_mean", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.J_stdv, fmt::format("{}/{}/model/J_stdv", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.h_mean, fmt::format("{}/{}/model/h_mean", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.h_stdv, fmt::format("{}/{}/model/h_stdv", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.lambda, fmt::format("{}/{}/model/lambda", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.delta, fmt::format("{}/{}/model/delta", basepath, algorithm));
+                h5_tgt.writeDataset(modelId.p.J_mean, fmt::format("{}/{}/model/J_mean", modelId.basepath, modelId.algorithm));
+                h5_tgt.writeDataset(modelId.p.J_stdv, fmt::format("{}/{}/model/J_stdv", modelId.basepath, modelId.algorithm));
+                h5_tgt.writeDataset(modelId.p.h_mean, fmt::format("{}/{}/model/h_mean", modelId.basepath, modelId.algorithm));
+                h5_tgt.writeDataset(modelId.p.h_stdv, fmt::format("{}/{}/model/h_stdv", modelId.basepath, modelId.algorithm));
+                h5_tgt.writeDataset(modelId.p.lambda, fmt::format("{}/{}/model/lambda", modelId.basepath, modelId.algorithm));
+                h5_tgt.writeDataset(modelId.p.delta, fmt::format("{}/{}/model/delta", modelId.basepath, modelId.algorithm));
             }
             if constexpr(std::is_same_v<T, lbit>) {
-                h5_tgt.writeDataset(hamiltonian.J1_mean, fmt::format("{}/{}/model/J1_mean", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.J2_mean, fmt::format("{}/{}/model/J2_mean", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.J3_mean, fmt::format("{}/{}/model/J3_mean", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.J1_wdth, fmt::format("{}/{}/model/J1_wdth", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.J2_wdth, fmt::format("{}/{}/model/J2_wdth", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.J3_wdth, fmt::format("{}/{}/model/J3_wdth", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.J2_base, fmt::format("{}/{}/model/J2_base", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.J2_span, fmt::format("{}/{}/model/J2_span", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.f_mixer, fmt::format("{}/{}/model/f_mixer", basepath, algorithm));
-                h5_tgt.writeDataset(hamiltonian.u_layer, fmt::format("{}/{}/model/u_layer", basepath, algorithm));
+                h5_tgt.writeDataset(modelId.p.J1_mean, fmt::format("{}/J1_mean", modelPath));
+                h5_tgt.writeDataset(modelId.p.J2_mean, fmt::format("{}/J2_mean", modelPath));
+                h5_tgt.writeDataset(modelId.p.J3_mean, fmt::format("{}/J3_mean", modelPath));
+                h5_tgt.writeDataset(modelId.p.J1_wdth, fmt::format("{}/J1_wdth", modelPath));
+                h5_tgt.writeDataset(modelId.p.J2_wdth, fmt::format("{}/J2_wdth", modelPath));
+                h5_tgt.writeDataset(modelId.p.J3_wdth, fmt::format("{}/J3_wdth", modelPath));
+                h5_tgt.writeDataset(modelId.p.J2_base, fmt::format("{}/J2_base", modelPath));
+                h5_tgt.writeDataset(modelId.p.J2_span, fmt::format("{}/J2_span", modelPath));
+                h5_tgt.writeDataset(modelId.p.f_mixer, fmt::format("{}/f_mixer", modelPath));
+                h5_tgt.writeDataset(modelId.p.u_layer, fmt::format("{}/u_layer", modelPath));
             }
         }
     }
     template void saveModel(const h5pp::File &h5_src, h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtModelDb,
-                            const ModelId<sdual> &modelId);
+                            const ModelId<sdual> &modelId, const FileId &fileId);
     template void saveModel(const h5pp::File &h5_src, h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtModelDb,
-                            const ModelId<lbit> &modelId);
+                            const ModelId<lbit> &modelId, const FileId &fileId);
 
     std::vector<DsetKey> gatherDsetKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const PathId &pathid,
                                         const std::vector<DsetKey> &srcKeys) {
@@ -420,14 +440,12 @@ namespace tools::h5io {
                 tools::logger::log->debug("Adding target dset {} | dims ({},{}) | chnk ({},{})", tgtPath, rows, cols, chunk_rows, 10l);
                 tgtDsetDb[tgtPath] = h5_tgt.createDataset(tgtPath, srcInfo.h5Type.value(), H5D_CHUNKED, {rows, cols}, {chunk_rows, 10l});
             }
-            auto &tgtInfo = tgtDsetDb[tgtPath].info;
-            auto &tgtDb   = tgtDsetDb[tgtPath].db;
+            auto &tgtId   = tgtDsetDb[tgtPath];
+            auto &tgtInfo = tgtId.info;
             // Determine the target index where to copy this record
-            long index = static_cast<long>(tgtInfo.dsetDims.value().at(1));
-            if(tgtDb.find(fileId.seed) != tgtDb.end()) {
-                index = tgtDb[fileId.seed];
-                //                    tools::logger::log->info("Found seed {} at index {}: dset {}", fileId.seed,index, srcInfo.dsetPath.value());
-            }
+            hsize_t index = tgtId.get_index(fileId.seed); // Positive if it has been read already
+            index         = index != std::numeric_limits<hsize_t>::max() ? index : tgtInfo.dsetDims.value().at(1);
+
             switch(srcKey.type) {
                 case Type::DOUBLE: internal::copy_dset<std::vector<double>>(h5_tgt, h5_src, tgtInfo, srcInfo, index); break;
                 case Type::LONG: internal::copy_dset<std::vector<long>>(h5_tgt, h5_src, tgtInfo, srcInfo, index); break;
@@ -440,7 +458,7 @@ namespace tools::h5io {
             }
 
             // Update the database
-            tgtDb[fileId.seed] = index;
+            tgtId.insert(fileId.seed, index);
         }
     }
 
@@ -458,122 +476,22 @@ namespace tools::h5io {
                 auto t_create = tid::tic_scope("createTable");
                 tools::logger::log->debug("Adding target table {}", tgtPath);
                 h5pp::TableInfo tableInfo = h5_tgt.getTableInfo(tgtPath);
-                if(not tableInfo.tableExists.value()) tableInfo = h5_tgt.createTable(srcInfo.h5Type.value(), tgtPath, srcInfo.tableTitle.value(),std::nullopt, true);
+                if(not tableInfo.tableExists.value())
+                    tableInfo = h5_tgt.createTable(srcInfo.h5Type.value(), tgtPath, srcInfo.tableTitle.value(), std::nullopt, true);
                 tgtTableDb[tgtPath] = tableInfo;
             }
+            auto &tgtId   = tgtTableDb[tgtPath];
+            auto &tgtInfo = tgtId.info;
 
-            auto &tgtInfo = tgtTableDb[tgtPath].info;
-            auto &tgtDb   = tgtTableDb[tgtPath].db;
-            long  index   = static_cast<long>(tgtInfo.numRecords.value());
-            if(tgtDb.find(fileId.seed) != tgtDb.end()) index = tgtDb[fileId.seed];
+            // Determine the target index where to copy this record
+            hsize_t index = tgtId.get_index(fileId.seed); // Positive if it has been read already
+            index         = index != std::numeric_limits<hsize_t>::max() ? index : tgtInfo.numRecords.value();
+
             tools::logger::log->trace("Copying table index {} -> {}: {}", srcInfo.numRecords.value(), index, tgtPath);
             auto t_copy = tid::tic_scope("copyTableRecords");
-            h5_tgt.copyTableRecords(srcInfo, h5pp::TableSelection::LAST, tgtInfo, static_cast<hsize_t>(index));
+            h5_tgt.copyTableRecords(srcInfo, tgtInfo, h5pp::TableSelection::LAST, index);
             // Update the database
-            tgtDb[fileId.seed] = index;
-
-//             Read the table record back to double check it was written
-//            std::vector<std::byte> src_rec;
-//            std::vector<std::byte> tgt_rec;
-//            src_rec.resize(srcInfo.recordBytes.value());
-//            tgt_rec.resize(tgtInfo.recordBytes.value());
-//
-//            h5pp::hdf5::readTableRecords(src_rec, srcInfo, srcInfo.numRecords.value() - 1, 1);
-//            h5pp::hdf5::readTableRecords(tgt_rec, tgtInfo, index, 1);
-//            tools::logger::log->info("src {:>4} \n{}", srcInfo.numRecords.value() - 1, fmt::join(src_rec, ""));
-//            tools::logger::log->info("tgt {:>4} \n{}", index, fmt::join(tgt_rec, ""));
-//            if(src_rec != tgt_rec) throw std::runtime_error(h5pp::format("Record mismatch: \n{}\n{}", fmt::join(src_rec, ""), fmt::join(tgt_rec, "")));
-//            H5Dflush(tgtInfo.h5Dset.value());
-        }
-    }
-
-    void transferCronos(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
-                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid, const std::vector<CronoKey> &srcCronoKeys,
-                        const FileId &fileId, const FileStats &fileStats) {
-        // In this function we take time series data from each srcTable and create multiple tables tgtTable, one for each
-        // time point (iteration). Each entry in tgtTable corresponds to the same time point on different realizations.
-        auto t_scope = tid::tic_scope(__FUNCTION__);
-        for(const auto &srcKey : srcCronoKeys) {
-            if(srcTableDb.find(srcKey.key) == srcTableDb.end()) throw std::logic_error(h5pp::format("Key [{}] was not found in source map", srcKey.key));
-            auto &srcInfo    = srcTableDb[srcKey.key];
-            auto  srcRecords = srcInfo.numRecords.value();
-
-            // Iterate over all table elements. These should be a time series measured at every iteration
-            // Note that there could in principle exist duplicate entries, which is why we can't trust the
-            // "rec" iterator but have to get the iteration number from the table directly.
-            // Try getting the iteration number, which is more accurate.
-
-            std::vector<size_t> iters;
-
-            try {
-                auto t_read = tid::tic_scope("readTableField");
-                h5pp::hdf5::readTableField(iters, srcInfo, {"iter"});
-                if(iters.empty()) tools::logger::log->warn("column [iter] does not exist in table [{}]", srcInfo.tablePath.value());
-            } catch(const std::exception &ex) { throw std::logic_error(fmt::format("Failed to get iteration numbers: {}", ex.what())); }
-            for(size_t rec = 0; rec < srcRecords; rec++) {
-                size_t iter = rec;
-                if(not iters.empty()) iter = iters[rec]; // Get the actual iteration number
-                auto tgtName = h5pp::fs::path(srcInfo.tablePath.value()).filename().string();
-                auto tgtPath = pathid.crono_path(tgtName, iter);
-
-                if(tgtTableDb.find(tgtPath) == tgtTableDb.end()) {
-                    auto t_create = tid::tic_scope("createTable");
-                    tools::logger::log->debug("Adding target crono {}", tgtPath);
-                    h5pp::TableInfo tableInfo = h5_tgt.getTableInfo(tgtPath);
-                    // Disabling compression is supposed to give a nice speedup. Read here:
-                    // https://support.hdfgroup.org/HDF5/doc1.8/Advanced/DirectChunkWrite/UsingDirectChunkWrite.pdf
-                    if(not tableInfo.tableExists.value())
-                        tableInfo = h5_tgt.createTable(srcInfo.h5Type.value(), tgtPath, srcInfo.tableTitle.value(),std::nullopt, true);
-                    //                    h5pp::hdf5::setTableSize(tableInfo, fileStats.files);
-                    //        h5pp::hid::h5p dapl = H5Dget_access_plist(tableInfo.h5Dset.value());
-                    //        size_t rdcc_nbytes = 4*1024*1024;
-                    //        size_t rdcc_nslots = rdcc_nbytes * 100 / (tableInfo.recordBytes.value() * tableInfo.chunkSize.value());
-                    //        H5Pset_chunk_cache(dapl, rdcc_nslots, rdcc_nbytes, 0.5);
-                    //        tableInfo.h5Dset = h5pp::hdf5::openLink<h5pp::hid::h5d>(tableInfo.getLocId(), tableInfo.tablePath.value(), true, dapl);
-
-                    tgtTableDb[tgtPath] = tableInfo;
-                }
-
-                auto &tgtInfo = tgtTableDb[tgtPath].info;
-                auto &tgtDb   = tgtTableDb[tgtPath].db;
-
-                // The table entry for the current realization may already have been added
-                // This happens for instance if we make extra entries in "finished" after adding them to "checkpoint" and/or "savepoint"
-                // However, these entries should be identical, so no need to copy them again.
-                if(tgtDb.find(fileId.seed) != tgtDb.end()) {
-#pragma message "Skipping here may not be wise?"
-                    tools::logger::log->info("Skip copying existing crono entry: {} | index {}", tgtPath, tgtDb[fileId.seed]);
-                    continue;
-                }
-
-                // Determine the target index where to copy this record
-                // Under normal circumstances, the "index" counts the number of realizations, or simulation seeds.
-                // tgtInfo.numRecords is the total number of realizations registered until now
-                long index = static_cast<long>(tgtInfo.numRecords.value());
-
-                // Find the previous table index in case it has already been registered
-                if(tgtDb.find(fileId.seed) != tgtDb.end()) index = tgtDb[fileId.seed];
-
-                // copy/append a source record at "iter" into the "index" position on the table.
-                tools::logger::log->trace("Copying crono index {} -> {}: {}", rec, index, tgtPath);
-                auto t_copy = tid::tic_scope("copyTableRecords");
-                h5_tgt.copyTableRecords(srcInfo, rec, 1, tgtInfo, static_cast<hsize_t>(index));
-                // Update the database
-                tgtDb[fileId.seed] = index;
-
-                // Read the table record back to double check it was written
-                //                std::vector<std::byte> src_rec;
-                //                std::vector<std::byte> tgt_rec;
-                //                src_rec.resize(srcInfo.recordBytes.value());
-                //                tgt_rec.resize(tgtInfo.recordBytes.value());
-
-                //                h5pp::hdf5::readTableRecords(src_rec, srcInfo, rec, 1);
-                //                h5pp::hdf5::readTableRecords(tgt_rec, tgtInfo, index,1);
-                //                tools::logger::log->info("src {:>4} {}",rec,fmt::join(src_rec,""));
-                //                tools::logger::log->info("tgt {:>4} {}",index,fmt::join(tgt_rec,""));
-                //                if(src_rec != tgt_rec) throw std::runtime_error(h5pp::format("Record mismatch: \n{}\n{}", fmt::join(src_rec,""),
-                //                fmt::join(tgt_rec,""))); H5Dflush(tgtInfo.h5Dset.value());
-            }
+            tgtId.insert(fileId.seed, index);
         }
     }
 
@@ -589,6 +507,7 @@ namespace tools::h5io {
             if(srcTableDb.find(srcKey.key) == srcTableDb.end()) throw std::logic_error(h5pp::format("Key [{}] was not found in source map", srcKey.key));
             auto &srcInfo    = srcTableDb[srcKey.key];
             auto  srcRecords = srcInfo.numRecords.value();
+            tools::logger::log->trace("Copying crono table {} -> {}", srcRecords, srcInfo.tablePath.value());
 
             // Iterate over all table elements. These should be a time series measured at every iteration
             // Note that there could in principle exist duplicate entries, which is why we can't trust the
@@ -626,30 +545,27 @@ namespace tools::h5io {
                     tgtTableDb[tgtPath] = tableInfo;
                     //                    tgtTableDb[tgtPath].info.assertWriteReady();
                 }
-
-                auto &tgtBuff = tgtTableDb[tgtPath].buff;
+                auto &tgtId   = tgtTableDb[tgtPath];
+                auto &tgtBuff = tgtId.buff;
                 //                auto &tgtInfo = tgtTableDb[tgtPath].info;
-                auto &tgtDb = tgtTableDb[tgtPath].db;
-
-                // The table entry for the current realization may already have been added
-                // This happens for instance if we make extra entries in "finished" after adding them to "checkpoint" and/or "savepoint"
-                // However, these entries should be identical, so no need to copy them again.
-                if(tgtDb.find(fileId.seed) != tgtDb.end()) {
-#pragma message "Skipping here may not be wise?"
-                    tools::logger::log->info("Skip copying existing crono entry: {} | index {}", tgtPath, tgtDb[fileId.seed]);
-                    continue;
-                }
 
                 // Determine the target index where to copy this record
                 // Under normal circumstances, the "index" counts the number of realizations, or simulation seeds.
                 // tgtInfo.numRecords is the total number of realizations registered until now
-                size_t index = fileStats.count - 1;
 
-                // Find the previous table index in case it has already been registered
-                if(tgtDb.find(fileId.seed) != tgtDb.end()) index = static_cast<size_t>(tgtDb[fileId.seed]);
+                hsize_t index = tgtId.get_index(fileId.seed); // Positive if it has been read already
+                if(index != std::numeric_limits<hsize_t>::max()) {
+                    // The table entry for the current realization may already have been added
+                    // This happens for instance if we make extra entries in "finished" after adding them to "checkpoint" and/or "savepoint"
+                    // However, these entries should be identical, so no need to copy them again.
+#pragma message "Skipping here may not be wise?"
+                    tools::logger::log->info("Skip copying existing crono entry: {} | index {}", tgtPath, index);
+                    continue;
+                }
+
+                index = index != std::numeric_limits<hsize_t>::max() ? index : static_cast<hsize_t>(fileStats.count - 1);
 
                 // read a source record at "iter" into the "index" position in the buffer
-                tools::logger::log->trace("Buffering crono index {} -> {}: {}", rec, index, tgtPath);
                 auto t_buffer = tid::tic_scope("bufferTableRecords");
                 srcReadBuffer.resize(srcInfo.recordBytes.value());
                 h5pp::hdf5::readTableRecords(srcReadBuffer, srcInfo, rec, 1);
@@ -660,20 +576,7 @@ namespace tools::h5io {
                 //                auto t_copy = tid::tic_scope("copyTableRecords");
                 //                h5_tgt.copyTableRecords(srcInfo, rec, 1, tgtInfo, static_cast<hsize_t>(index));
                 // Update the database
-                tgtDb[fileId.seed] = static_cast<long>(index);
-
-                // Read the table record back to double check it was written
-                //                std::vector<std::byte> src_rec;
-                //                std::vector<std::byte> tgt_rec;
-                //                src_rec.resize(srcInfo.recordBytes.value());
-                //                tgt_rec.resize(tgtInfo.recordBytes.value());
-
-                //                h5pp::hdf5::readTableRecords(src_rec, srcInfo, rec, 1);
-                //                h5pp::hdf5::readTableRecords(tgt_rec, tgtInfo, index,1);
-                //                tools::logger::log->info("src {:>4} {}",rec,fmt::join(src_rec,""));
-                //                tools::logger::log->info("tgt {:>4} {}",index,fmt::join(tgt_rec,""));
-                //                if(src_rec != tgt_rec) throw std::runtime_error(h5pp::format("Record mismatch: \n{}\n{}", fmt::join(src_rec,""),
-                //                fmt::join(tgt_rec,""))); H5Dflush(tgtInfo.h5Dset.value());
+                tgtId.insert(fileId.seed, index);
             }
         }
     }
@@ -689,16 +592,6 @@ namespace tools::h5io {
             // Clear when moving to another set of seeds (new point on the phase diagram)
             srcdb.clear();
             srcdb.parent_path = parent_path;
-            tools::h5db::saveDatabase(h5_tgt, tgtdb.file);
-            tools::h5db::saveDatabase(h5_tgt, tgtdb.model);
-            tools::h5db::saveDatabase(h5_tgt, tgtdb.table);
-            tools::h5db::saveDatabase(h5_tgt, tgtdb.dset);
-            tools::h5db::saveDatabase(h5_tgt, tgtdb.crono);
-            tgtdb.table.clear();
-            tgtdb.model.clear();
-            tgtdb.dset.clear();
-            tgtdb.crono.clear();
-            h5_tgt.flush();
         }
 
         // Start finding the required components in the source
@@ -709,7 +602,7 @@ namespace tools::h5io {
             if(modelKeys.size() != 1) throw std::runtime_error("Exactly 1 model has to be loaded into keys");
             auto &modelId = srcdb.model[modelKeys.back().key];
             // Save the model to file if it hasn't
-            tools::h5io::saveModel(h5_src, h5_tgt, tgtdb.model, modelId);
+            tools::h5io::saveModel(h5_src, h5_tgt, tgtdb.model, modelId, fileId);
             auto tgt_base = modelId.basepath;
             // Next search for tables and datasets in the source file
             // and transfer them to the target file

@@ -11,9 +11,8 @@ namespace tools::io {
     template<bool RECURSIVE>
     std::vector<h5pp::fs::path> find_dir(const h5pp::fs::path &base, const std::string &pattern, const std::string &subdir = "/output");
 
-    std::vector<h5pp::fs::path> find_h5_dirs(const std::vector<h5pp::fs::path> &src_dirs, size_t max_dirs);
-
-
+    std::vector<h5pp::fs::path> find_h5_dirs(const std::vector<h5pp::fs::path> &src_dirs, size_t max_dirs,
+                                             const std::vector<std::string> & inc, const std::vector<std::string> & exc);
 
 }
 

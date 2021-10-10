@@ -13,49 +13,34 @@ BufferedTableInfo &BufferedTableInfo::operator=(h5pp::TableInfo *info_) {
 }
 BufferedTableInfo::~BufferedTableInfo() { flush(); }
 
-void BufferedTableInfo::insert(const std::vector<std::byte> &entry, size_t index) {
+void BufferedTableInfo::insert(const std::vector<std::byte> &entry, hsize_t index) {
     if(info == nullptr) throw std::runtime_error("insert: info is nullptr");
     if(entry.size() != info->recordBytes.value()) throw std::runtime_error("insert: record and entry size mismatch");
     if(recordBuffer.size() >= maxRecords) flush();
 
     // We need to find out if there is already a contigous buffer where we can append this entry. If not, we start a new contiguous buffer
-    for(auto &r : recordBuffer){
-        if(r.offset + r.extent == index){
+    for(auto &r : recordBuffer) {
+        if(r.offset + r.extent == index) {
             r.rawdata.insert(r.rawdata.end(), entry.begin(), entry.end());
             r.extent += 1;
-            h5pp::print("Inserting 1 records at index {} into offset {} extent {}\n", index, r.offset, r.extent );
+            //            h5pp::print("Inserting 1 records at index {} into offset {} extent {}\n", index, r.offset, r.extent );
 
             return;
         }
     }
     // None was found, so we make a new one
     recordBuffer.emplace_back(ContiguousBuffer{index, 1ul, entry});
-    auto & r = recordBuffer.back();
-    h5pp::print("Inserting 1 records at index {} into offset {} extent {}\n",  index, r.offset, r.extent );
-
+    //    auto & r = recordBuffer.back();
+    //    h5pp::print("Inserting 1 records at index {} into offset {} extent {}\n",  index, r.offset, r.extent );
 }
 
-
 void BufferedTableInfo::flush() {
-    if (recordBuffer.empty()) return;
+    if(recordBuffer.empty()) return;
     if(info == nullptr) throw std::runtime_error("flush: info is nullptr");
-//    std::vector<std::byte> readData;
-    h5pp::logger::setLogLevel(0);
-    for(const auto & r : recordBuffer){
-        h5pp::hdf5::writeTableRecords(r.rawdata, *info, r.offset, r.extent);
-
-//        h5pp::hdf5::readTableRecords(readData, *info, r.offset, r.extent);
-//        if(readData != r.rawdata){
-//            h5pp::print("raw  data\n{}\n", fmt::join(r.rawdata,""));
-//            h5pp::print("read data\n{}\n", fmt::join(readData,""));
-//            throw std::runtime_error("Mismatch data");
-//        }
-    }
-
+    for(const auto &r : recordBuffer) { h5pp::hdf5::writeTableRecords(r.rawdata, *info, r.offset, r.extent); }
 
     recordBuffer.clear();
 }
-
 
 FileId::FileId(long seed_, std::string_view path_, std::string_view hash_) : seed(seed_) {
     strncpy(path, path_.data(), sizeof(path) - 1);
@@ -68,7 +53,7 @@ FileId::FileId(long seed_, std::string_view path_, std::string_view hash_) : see
 std::string FileId::string() const { return h5pp::format("path [{}] | seed {} | hash {}", path, seed, hash); }
 
 template<typename InfoType>
-InfoId<InfoType>::InfoId(long seed_, long index_) {
+InfoId<InfoType>::InfoId(long seed_, hsize_t index_) {
     db[seed_] = index_;
 }
 template<typename InfoType>
@@ -76,7 +61,7 @@ InfoId<InfoType>::InfoId(const InfoType &info_) : info(info_) {}
 template struct InfoId<h5pp::DsetInfo>;
 template struct InfoId<h5pp::TableInfo>;
 
-InfoId<BufferedTableInfo>::InfoId(long seed_, long index_) { db[seed_] = index_; }
+InfoId<BufferedTableInfo>::InfoId(long seed_, hsize_t index_) { db[seed_] = index_; }
 InfoId<BufferedTableInfo>::InfoId(const h5pp::TableInfo &info_) : info(info_), buff(BufferedTableInfo(&info)) {
     //    h5pp::print("Copy constructor for buffered table {}\n", info.tablePath.value());
 }
@@ -143,7 +128,7 @@ void H5T_SeedId::register_table_type() {
     if(h5_type.valid()) return;
     h5_type = H5Tcreate(H5T_COMPOUND, sizeof(SeedId));
     H5Tinsert(h5_type, "seed", HOFFSET(SeedId, seed), H5T_NATIVE_LONG);
-    H5Tinsert(h5_type, "index", HOFFSET(SeedId, index), H5T_NATIVE_LONG);
+    H5Tinsert(h5_type, "index", HOFFSET(SeedId, index), H5T_NATIVE_HSIZE);
 }
 
 H5T_profiling::H5T_profiling() { register_table_type(); }
