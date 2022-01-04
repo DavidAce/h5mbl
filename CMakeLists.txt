@@ -70,62 +70,64 @@ if(H5MBL_ENABLE_CCACHE)
 endif()
 
 
-unset(CONAN_BUILD_INFO)
-unset(CONAN_BUILD_INFO CACHE)
-find_file(CONAN_BUILD_INFO
-        conanbuildinfo.cmake
-        HINTS ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_LIST_DIR}
-        NO_DEFAULT_PATH)
-find_file(CONANFILE
-        conanfile.txt
-        HINTS ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}
-        REQUIRED
-        NO_DEFAULT_PATH)
-
-if(CONAN_BUILD_INFO AND CONANFILE AND ${CONAN_BUILD_INFO} IS_NEWER_THAN ${CONANFILE})
-    ##################################################################
-    ### Use pre-existing conanbuildinfo.cmake                      ###
-    ### This avoids having to run conan again                      ###
-    ##################################################################
-    message(STATUS "Detected Conan build info: ${CONAN_BUILD_INFO}")
-    include(${CONAN_BUILD_INFO})
-    conan_basic_setup(TARGETS)
-else ()
-
-    # Download Conan-CMake integration automatically, you can also just copy the conan.cmake file
-    if (NOT EXISTS "${CMAKE_BINARY_DIR}/conan.cmake")
-        message(STATUS "Downloading conan.cmake from https://github.com/conan-io/cmake-conan")
-        file(DOWNLOAD "https://github.com/conan-io/cmake-conan/raw/v0.16.1/conan.cmake"
-                "${CMAKE_BINARY_DIR}/conan.cmake")
-    endif ()
 
 
-    find_program(
-            CONAN_COMMAND
-            conan
-            HINTS ${CONAN_PREFIX} $ENV{CONAN_PREFIX} ${CONDA_PREFIX} $ENV{CONDA_PREFIX}
-            PATHS $ENV{HOME}/anaconda3 $ENV{HOME}/miniconda3 $ENV{HOME}/anaconda $ENV{HOME}/miniconda $ENV{HOME}/.conda
-            PATH_SUFFIXES bin envs/dmrg/bin
-    )
-    if (NOT CONAN_COMMAND)
-        message(FATAL_ERROR "Could not find conan program executable")
-    else ()
-        message(STATUS "Found conan: ${CONAN_COMMAND}")
-    endif ()
+##################################################################
+### Install dependencies from conanfile.txt                    ###
+##################################################################
+unset(CONAN_COMMAND CACHE)
+find_program (CONAN_COMMAND conan
+        HINTS ${CONAN_PREFIX} $ENV{CONAN_PREFIX} ${CONDA_PREFIX} $ENV{CONDA_PREFIX}
+        PATHS $ENV{HOME}/anaconda3 $ENV{HOME}/miniconda3 $ENV{HOME}/anaconda $ENV{HOME}/miniconda $ENV{HOME}/.conda
+        PATH_SUFFIXES bin envs/dmrg/bin)
+
+if(NOT CONAN_COMMAND)
+    message(FATAL_ERROR "Could not find conan program executable")
+else()
+    message(STATUS "Found conan: ${CONAN_COMMAND}")
+endif()
+
+# Download cmake-conan integrator
+if(NOT EXISTS "${CMAKE_BINARY_DIR}/conan/conan.cmake")
+    message(STATUS "Downloading conan.cmake from https://github.com/conan-io/cmake-conan")
+    file(DOWNLOAD "https://raw.githubusercontent.com/conan-io/cmake-conan/release/0.17/conan.cmake"
+            "${CMAKE_BINARY_DIR}/conan/conan.cmake"
+            EXPECTED_HASH MD5=52a255a933397fdce3d0937f9c737e98
+            TLS_VERIFY ON)
+endif()
+include(${CMAKE_BINARY_DIR}/conan/conan.cmake)
+
+conan_cmake_autodetect(CONAN_AUTODETECT)
+conan_cmake_install(
+        CONAN_COMMAND ${CONAN_COMMAND}
+        BUILD missing outdated cascade
+        GENERATOR cmake_find_package_multi
+        SETTINGS ${CONAN_AUTODETECT}
+        INSTALL_FOLDER ${CMAKE_BINARY_DIR}/conan
+        PATH_OR_REFERENCE ${CMAKE_SOURCE_DIR}
+)
+
+##################################################################
+### Find all the things!                                       ###
+##################################################################
+if(NOT CONAN_CMAKE_SILENT_OUTPUT)
+    set(CONAN_CMAKE_SILENT_OUTPUT OFF) # Default is off
+endif()
+list(PREPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR}/conan)
+list(PREPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR}/conan)
+# Use CONFIG to avoid MODULE mode. This is recommended for the cmake_find_package_multi generator
+
+find_package(CLI11        2.1.1  REQUIRED CONFIG)
+find_package(h5pp         1.9.1  REQUIRED CONFIG)
+find_package(OpenSSL      1.1.1  REQUIRED CONFIG)
+find_package(Backward     1.6    REQUIRED CONFIG)
 
 
-    include(${CMAKE_BINARY_DIR}/conan.cmake)
-    conan_cmake_run(
-            CONAN_COMMAND ${CONAN_COMMAND}
-            CONANFILE conanfile.txt
-            BUILD_TYPE ${CMAKE_BUILD_TYPE}
-            BASIC_SETUP CMAKE_TARGETS
-            BUILD missing
-    )
-endif ()
+target_link_libraries(h5mbl PUBLIC CLI11::CLI11)
+target_link_libraries(h5mbl PUBLIC h5pp::h5pp)
+target_link_libraries(h5mbl PUBLIC OpenSSL::OpenSSL)
+target_link_libraries(h5mbl PUBLIC Backward::Backward)
 
-
-target_link_libraries(${PROJECT_NAME} PRIVATE ${CONAN_TARGETS})
 
 # Print summary of CMake configuration
 include(cmake/PrintTargetInfo.cmake)
