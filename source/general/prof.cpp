@@ -6,8 +6,8 @@
 namespace tools::prof {
 
     void print_profiling() {
-        for(const auto &t : tid::get_tree())
-            if(t->get_level() <= tid::level::normal) tools::logger::log->info("{}", t.str());
+        auto lvl = tid::level::normal;
+        for(const auto &t : tid::get_tree("", lvl)) tools::logger::log->info("{}", t.str());
     }
 
 
