@@ -37,7 +37,7 @@ namespace tools::parse {
     }
 
     template<typename T>
-    [[nodiscard]] T extract_paramter_from_path(const std::string &input, const std::string &param_name) {
+    [[nodiscard]] T extract_parameter_from_path(const std::string &input, const std::string &param_name) {
         std::string param_str = input.substr(input.find(param_name) + param_name.size(), input.find('/') - 1);
         try {
             return parse_param<T>(param_str, input);
