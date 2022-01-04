@@ -76,8 +76,13 @@ find_file(CONAN_BUILD_INFO
         conanbuildinfo.cmake
         HINTS ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_LIST_DIR}
         NO_DEFAULT_PATH)
+find_file(CONANFILE
+        conanfile.txt
+        HINTS ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}
+        REQUIRED
+        NO_DEFAULT_PATH)
 
-if (CONAN_BUILD_INFO)
+if(CONAN_BUILD_INFO AND CONANFILE AND ${CONAN_BUILD_INFO} IS_NEWER_THAN ${CONANFILE})
     ##################################################################
     ### Use pre-existing conanbuildinfo.cmake                      ###
     ### This avoids having to run conan again                      ###
