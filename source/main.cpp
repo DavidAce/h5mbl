@@ -22,28 +22,6 @@
 #include <omp.h>
 #include <string>
 #include <tid/tid.h>
-void print_usage() {
-    std::printf(
-        R"(
-==========  h5mbl  ============
-Usage                       : ./cpp_merger [-option <value>].
--h                          : Help. Shows this text.
--b <base_dir>               : Default base directory (default /mnt/WDB-AN1500/mbl_transition)
--d <max dirs>               : Max number of directories to merge (default = inf)
--f                          : Require that src file has finished
--l                          : Link only. Make the main file with external links to all the others.
--m <max files>              : Max number of files to merge (default = inf)
--M <model>                  : Choose [sdual|lbit] (default = sdual)
--n <tgt_filename>           : Target filename (default merged.h5)
--o <src_out>                : Name of the output directory inside the root directory (default = "")
--r                          : Replace target file if one exists (truncate)
--s <src_dir>                : Root directory for the output files. Supports pattern matching for relative paths.
--t <tgt_dir>                : Target directory for the single output file
--D                          : Write to destination directly, without using /tmp path
--v <level>                  : Enables verbosity. Default level 2 (0 is max verbosity)
--V <level>                  : Enables trace-level verbosity of h5pp. Default level 2 (0 is max verbosity)
-)");
-}
 
 template<typename T>
 void append_dset(h5pp::File &h5_tgt, const h5pp::File &h5_src, h5pp::DsetInfo &tgtInfo, h5pp::DsetInfo &srcInfo) {
@@ -118,7 +96,7 @@ int main(int argc, char *argv[]) {
         app.add_option("-t,--destdir"     , tgt_dir         , "The destination directory for the merge-file")->required();
         app.add_option("-o,--srcout"      , src_out         , "The name of the source directory where simulation files are found");
         app.add_option("-s,--srcdirs"     , src_dirs        , "List of output directory patterns from where to collect simulation files");
-        app.add_flag  ("-f,--finished"    , finished       , "Require that src file has finished");
+        app.add_flag  ("-f,--finished"    , finished        , "Require that src file has finished");
         app.add_flag  ("-l,--linkonly"    , link_only       , "Link only. Make the main file with external links to all the others");
         app.add_flag  ("-r,--replace"     , replace         , "Replace existing files");
         app.add_flag  ("-T,--usetemp"     , use_tmp         , "Use temp directory");
@@ -163,6 +141,7 @@ int main(int argc, char *argv[]) {
         std::at_quick_exit(tools::prof::print_profiling);
         std::atexit(tools::prof::print_mem_usage);
     }
+
     auto t_h5mbl = tid::tic_scope("h5mbl");
     mpi::init();
 
@@ -246,17 +225,45 @@ int main(int argc, char *argv[]) {
                 //                     {Type::COMPLEX, Size::VAR, "schmidt_midchain", ""}};
                 //            keys.bonds = DsetKey{Type::COMPLEX, Size::VAR, "L_", ""};
 
-                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "bond_dimensions", Size::FIX, Type::LONG));
-                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "entanglement_entropies", Size::FIX, Type::DOUBLE));
-                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "truncation_errors", Size::FIX, Type::DOUBLE));
-                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "schmidt_midchain", Size::VAR, Type::COMPLEX));
-                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished/profiling", "xDMRG.run", Size::FIX, Type::TID));
-
-                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "finished", "status"));
-                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "finished", "mem_usage"));
-                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "finished", "measurements"));
-
                 keys.models.emplace_back(ModelKey("xDMRG", "model", "hamiltonian"));
+
+                // A table records data from the last time step
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "status"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "mem_usage"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "measurements"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "bond_dimensions"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "entanglement_entropies"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "renyi_entropies_2"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "renyi_entropies_3"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "renyi_entropies_4"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "renyi_entropies_100"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "renyi_entropies_inf"));
+                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "tables", "truncation_errors"));
+
+                keys.scales.emplace_back(ScaleKey("xDMRG", "state_*", "fes", "chi_*", "measurements"));
+                keys.scales.emplace_back(ScaleKey("xDMRG", "state_*", "fes", "chi_*", "bond_dimensions"));
+                keys.scales.emplace_back(ScaleKey("xDMRG", "state_*", "fes", "chi_*", "entanglement_entropies"));
+                keys.scales.emplace_back(ScaleKey("xDMRG", "state_*", "fes", "chi_*", "truncation_errors"));
+                keys.scales.emplace_back(ScaleKey("xDMRG", "state_*", "fes", "chi_*", "mem_usage"));
+                keys.scales.emplace_back(ScaleKey("xDMRG", "state_*", "fes", "chi_*", "status"));
+
+                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "correlation_matrix_sx", Size::FIX, 2));
+                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "correlation_matrix_sy", Size::FIX, 2));
+                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "correlation_matrix_sz", Size::FIX, 2));
+                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "expectation_values_sx", Size::FIX, 1));
+                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "expectation_values_sy", Size::FIX, 1));
+                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "expectation_values_sz", Size::FIX, 1));
+
+
+                //                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "entanglement_entropies", Size::FIX, Type::DOUBLE));
+                //                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "truncation_errors", Size::FIX, Type::DOUBLE));
+                //                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished", "schmidt_midchain", Size::VAR, Type::COMPLEX));
+                //                keys.dsets.emplace_back(DsetKey("xDMRG", "state_*", "finished/profiling", "xDMRG.run", Size::FIX, Type::TID));
+                //
+                //                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "finished", "status"));
+                //                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "finished", "mem_usage"));
+                //                keys.tables.emplace_back(TableKey("xDMRG", "state_*", "finished", "measurements"));
+
                 break;
             }
             case Model::LBIT: {
@@ -300,17 +307,17 @@ int main(int argc, char *argv[]) {
             //        herr_t erb    = H5Pset_page_buffer_size(plists.fileAccess, 10 * 1024 * 1024, 1, 1);
             auto h5_tgt = h5pp::File();
 
-            try{
+            try {
                 h5_tgt = h5pp::File(h5_tgt_path, perm, verbosity_h5pp);
 
-            }catch (const std::exception & ex){
+            } catch(const std::exception &ex) {
                 H5Eprint(H5E_DEFAULT, stderr);
                 tools::logger::log->error("Error opening target file: {}", ex.what());
                 tools::logger::log->error("Replacing broken file: [{}]: {}", h5_tgt_path);
                 h5_tgt = h5pp::File(h5_tgt_path, h5pp::FilePermission::REPLACE, verbosity_h5pp);
             }
 
-//            auto h5_tgt = h5pp::File(h5_tgt_path, perm, verbosity_h5pp);
+            //            auto h5_tgt = h5pp::File(h5_tgt_path, perm, verbosity_h5pp);
             tools::h5dbg::assert_no_dangling_ids(h5_tgt, __FUNCTION__, __LINE__); // Check that there are no open HDF5 handles
             //        hsize_t fsp_size; size_t pbs_size;
             //        H5Pget_file_space_page_size(H5Fget_create_plist(h5_tgt.openFileHandle()), &fsp_size);
@@ -339,7 +346,6 @@ int main(int argc, char *argv[]) {
                 std::atexit(clean_up);
                 std::at_quick_exit(clean_up);
             }
-
             // Load database
             tools::h5db::TgtDb tgtdb;
             //    h5_tgt.setDriver_core();
@@ -349,14 +355,15 @@ int main(int argc, char *argv[]) {
                 tgtdb.dset    = tools::h5db::loadDatabase<h5pp::DsetInfo>(h5_tgt, keys.dsets);
                 tgtdb.table   = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.tables);
                 tgtdb.crono   = tools::h5db::loadDatabase<BufferedTableInfo>(h5_tgt, keys.cronos);
+                tgtdb.scale   = tools::h5db::loadDatabase<BufferedTableInfo>(h5_tgt, keys.scales);
                 tgtdb.model   = tools::h5db::loadDatabase<h5pp::TableInfo>(h5_tgt, keys.models);
             }
             {
                 for(const auto &[infoKey, infoId] : tgtdb.table) infoId.info.assertReadReady();
                 for(const auto &[infoKey, infoId] : tgtdb.dset) infoId.info.assertReadReady();
                 //                for(const auto &[infoKey, infoId] : tgtdb.model) infoId.info.assertReadReady() ;
-                for(const auto &[infoKey, infoId] : tgtdb.table) infoId.info.assertReadReady();
                 for(const auto &[infoKey, infoId] : tgtdb.crono) infoId.info.assertReadReady();
+                for(const auto &[infoKey, infoId] : tgtdb.scale) infoId.info.assertReadReady();
             }
             uintmax_t tgtBytes = h5pp::fs::file_size(h5_tgt.getFilePath());
 
@@ -502,12 +509,14 @@ int main(int argc, char *argv[]) {
             tools::h5db::saveDatabase(h5_tgt, tgtdb.model);
             tools::h5db::saveDatabase(h5_tgt, tgtdb.table);
             tools::h5db::saveDatabase(h5_tgt, tgtdb.crono);
+            tools::h5db::saveDatabase(h5_tgt, tgtdb.scale);
             tools::h5db::saveDatabase(h5_tgt, tgtdb.dset);
 
             tgtdb.file.clear();
             tgtdb.model.clear();
             tgtdb.table.clear();
             tgtdb.crono.clear();
+            tgtdb.scale.clear();
             tgtdb.dset.clear();
 
             // TODO: Put the lines below in a "at quick exit" function
@@ -540,9 +549,14 @@ int main(int argc, char *argv[]) {
                     auto h5_ext = h5pp::File(obj.path().string(), h5pp::FilePermission::READONLY, verbosity_h5pp);
                     // Find the path to the algorithm in this external file
                     auto algo_group = h5_ext.findGroups(tgt_algo, "/", 1);
-                    if(algo_group.empty())
-                        throw std::runtime_error(
-                            h5pp::format("Could not find algo group {} in external file {}: [{}]", tgt_algo, obj.path().string(), algo_group));
+                    if(algo_group.empty()) {
+                        tools::logger::log->error("Could not find algo group {} in external file {}: [{}]", tgt_algo, obj.path().string(), algo_group);
+                        continue;
+                        //                        throw std::runtime_error(
+                        //                            h5pp::format("Could not find algo group {} in external file {}: [{}]", tgt_algo, obj.path().string(),
+                        //                            algo_group));
+                    }
+
                     auto tgt_link = h5pp::fs::proximate(obj.path(), tgt_dir);
                     tools::logger::log->info("Creating external link: {} -> {}", algo_group[0], tgt_link.string());
                     h5_tgt.createExternalLink(tgt_link.string(), algo_group[0], algo_group[0]);

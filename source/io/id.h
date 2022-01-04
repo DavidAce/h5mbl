@@ -57,11 +57,11 @@ struct FileId {
 struct lbit {
     double                   J1_mean, J2_mean, J3_mean;
     double                   J1_wdth, J2_wdth, J3_wdth;
-    double                   J2_base;
+    double                   J2_xcls;
     size_t                   J2_span;
     double                   f_mixer;
     size_t                   u_layer;
-    std::vector<std::string> fields = {"J1_mean", "J2_mean", "J3_mean", "J1_wdth", "J2_wdth", "J3_wdth", "J2_base", "J2_span", "f_mixer", "u_layer"};
+    std::vector<std::string> fields = {"J1_mean", "J2_mean", "J3_mean", "J1_wdth", "J2_wdth", "J3_wdth", "J2_xcls", "J2_span", "f_mixer", "u_layer"};
 };
 
 struct sdual {
@@ -95,6 +95,7 @@ struct PathId {
     [[nodiscard]] std::string dset_path(std::string_view dsetname) const;
     [[nodiscard]] std::string table_path(std::string_view tablename) const;
     [[nodiscard]] std::string crono_path(std::string_view tablename, size_t iter) const;
+    [[nodiscard]] std::string scale_path(std::string_view tablename, size_t chi) const;
 
     private:
     static bool match(std::string_view comp, std::string_view pattern);

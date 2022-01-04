@@ -24,31 +24,34 @@ namespace tools::h5io {
     std::string get_tmp_dirname(std::string_view exename) { return fmt::format("{}.{}", h5pp::fs::path(exename).filename().string(), getenv("USER")); }
 
     namespace internal {
-        template<typename T>
-        void append_dset(h5pp::File &h5_tgt, const h5pp::File &h5_src, h5pp::DsetInfo &tgtInfo, h5pp::DsetInfo &srcInfo) {
-            auto   t_scope = tid::tic_scope(__FUNCTION__);
-            auto   data    = h5_src.readDataset<T>(srcInfo);
-            size_t maxrows = data.size();
-            if(tgtInfo.dsetDims) maxrows = std::min<size_t>(maxrows, tgtInfo.dsetDims.value()[0]);
-            h5_tgt.appendToDataset(data, tgtInfo, 1, {maxrows, 1});
-        }
-        template<typename T>
-        void copy_dset(h5pp::File &h5_tgt, const h5pp::File &h5_src, h5pp::DsetInfo &tgtInfo, h5pp::DsetInfo &srcInfo, hsize_t index) {
+        void copy_dset(h5pp::File &h5_tgt, const h5pp::File &h5_src, h5pp::DsetInfo &tgtInfo, h5pp::DsetInfo &srcInfo, hsize_t index, size_t axis) {
             auto t_scope = tid::tic_scope(__FUNCTION__);
-            if(index >= tgtInfo.dsetDims.value().at(1)) return append_dset<T>(h5_tgt, h5_src, tgtInfo, srcInfo);
-            auto   data    = h5_src.readDataset<T>(srcInfo);
-            size_t maxrows = data.size();
-            if(tgtInfo.dsetDims) maxrows = std::min<size_t>(maxrows, tgtInfo.dsetDims.value()[0]);
+            auto data = h5_src.readDataset<std::vector<std::byte>>(srcInfo); // Read the data into a generic buffer.
+            h5pp::DataInfo dataInfo;
 
-            h5pp::Options options;
+            // The axis parameter must be  < srcInfo.rank+1
+            if(axis > srcInfo.dsetDims->size()){
+                dataInfo.dataByte = srcInfo.dsetByte;
+                dataInfo.dataSize = srcInfo.dsetSize;
+                dataInfo.dataRank = tgtInfo.dsetRank; // E.g. if stacking rank 2 matrices then axis == 2 and so data rank must be 3.
+                dataInfo.dataDims = std::vector<hsize_t>(axis+1, 1ull);
+                for(size_t i = 0; i < srcInfo.dsetDims->size(); i++) dataInfo.dataDims.value()[i] = srcInfo.dsetDims.value()[i];
+                dataInfo.h5Space = h5pp::util::getMemSpace(dataInfo.dataSize.value(), dataInfo.dataDims.value());
+            }else{
+                dataInfo.dataDims = srcInfo.dsetDims;
+                dataInfo.dataSize = srcInfo.dsetSize;
+                dataInfo.dataByte = srcInfo.dsetByte;
+                dataInfo.dataRank = srcInfo.dsetRank;
+                dataInfo.h5Space = srcInfo.h5Space;
+            }
             tgtInfo.resizePolicy     = h5pp::ResizePolicy::GROW;
             tgtInfo.dsetSlab         = h5pp::Hyperslab();
-            tgtInfo.dsetSlab->extent = {maxrows, 1};
-            tgtInfo.dsetSlab->offset = {0, index};
-            options.dataDims         = {maxrows, 1};
-            h5_tgt.writeDataset(data, tgtInfo, options);
+            tgtInfo.dsetSlab->extent = dataInfo.dataDims;
+            tgtInfo.dsetSlab->offset = std::vector<hsize_t>(tgtInfo.dsetDims->size(), 0);
+            tgtInfo.dsetSlab->offset.value()[axis] = index;
+
+            h5_tgt.appendToDataset(data, dataInfo, tgtInfo, static_cast<size_t>(axis));
             // Restore previous settings
-            tgtInfo.resizePolicy = h5pp::ResizePolicy::GROW;
             tgtInfo.dsetSlab     = std::nullopt;
         }
 
@@ -73,14 +76,20 @@ namespace tools::h5io {
         auto t_scope = tid::tic_scope(__FUNCTION__);
         if constexpr(std::is_same_v<T, sdual>) return h5pp::format("L_{1}/l_{2:.{0}f}/d_{3:+.{0}f}", decimals, H.model_size, H.p.lambda, H.p.delta);
         if constexpr(std::is_same_v<T, lbit>) {
-            decimals               = 2;
             std::string J_mean_str = fmt::format("J[{1:+.{0}f}_{2:+.{0}f}_{3:+.{0}f}]", decimals, H.p.J1_mean, H.p.J2_mean, H.p.J3_mean);
             std::string J_wdth_str = fmt::format("w[{1:+.{0}f}_{2:+.{0}f}_{3:+.{0}f}]", decimals, H.p.J1_wdth, H.p.J2_wdth, H.p.J3_wdth);
-            std::string b_str      = fmt::format("b_{1:.{0}f}", decimals, H.p.J2_base);
+            std::string x_str      = fmt::format("x_{1:.{0}f}", decimals, H.p.J2_xcls);
             std::string f_str      = fmt::format("f_{1:.{0}f}", decimals, H.p.f_mixer);
             std::string u_str      = fmt::format("u_{}", H.p.u_layer);
-            std::string r_str      = fmt::format("r_{}", H.p.J2_span);
-            return h5pp::format("L_{}/{}/{}/{}/{}/{}/{}", H.model_size, J_mean_str, J_wdth_str, b_str, f_str, u_str, r_str);
+            std::string r_str;
+            // J2_span is special since it can be -1ul. We prefer putting -1 in the path rather than 18446744073709551615
+            if(H.p.J2_span == -1ul)
+                r_str = fmt::format("r_L");
+            else
+                r_str = fmt::format("r_{}", H.p.J2_span);
+            auto base = h5pp::format("L_{}/{}/{}/{}/{}/{}/{}", H.model_size, J_mean_str, J_wdth_str, x_str, f_str, u_str, r_str);
+            tools::logger::log->info("creating base with {} decimals: {}", decimals, base);
+            return base;
         }
     }
     template std::string get_standardized_base(const ModelId<sdual> &H, int decimals);
@@ -92,19 +101,19 @@ namespace tools::h5io {
         std::vector<std::string>                                                  result;
         for(const auto &key : expectedKeys) {
             internal::SearchResult searchQuery = {root, key, hits, depth, {}};
-            auto                   cachedIt    = cache.find(searchQuery);
-            bool                   cacheHit    = cachedIt != cache.end() and                      // The search query has been processed earlier
+            std::string            cacheMsg;
+            auto                   cachedIt = cache.find(searchQuery);
+            bool                   cacheHit = cachedIt != cache.end() and                         // The search query has been processed earlier
                             ((hits > 0 and static_cast<long>(cachedIt->result.size()) >= hits) or // Asked for a up to "hits" reslts
                              (hits <= 0 and static_cast<long>(cachedIt->result.size()) >= 1)      // Asked for any number of results
                             );
             if(cacheHit) {
-                tools::logger::log->trace("Cache hit: key {} | result {} | cache {}", key, result, cachedIt->result);
                 for(auto &item : cachedIt->result) {
                     if(result.size() > 1 and std::find(result.begin(), result.end(), item) != result.end()) continue;
                     result.emplace_back(item);
                 }
+                cacheMsg = " | cache hit";
             } else {
-                tools::logger::log->trace("Searching: key {} | result {}", key, result);
                 std::vector<std::string> found;
                 if(key.empty())
                     found.emplace_back(key);
@@ -130,6 +139,7 @@ namespace tools::h5io {
                     result.emplace_back(item);
                 }
             }
+            tools::logger::log->trace("Search: key [{}] | result [{}]{}", key, result, cacheMsg);
         }
         return result;
     }
@@ -161,22 +171,22 @@ namespace tools::h5io {
                     hamiltonian.J2_wdth = h5_src.readAttribute<double>("J2_wdth", path);
                     hamiltonian.J3_wdth = h5_src.readAttribute<double>("J3_wdth", path);
                     try {
-                        hamiltonian.J2_base = h5_src.readAttribute<double>("J2_base", path);
+                        hamiltonian.J2_xcls = h5_src.readAttribute<double>("J2_xcls", path);
                     } catch(const std::exception &ex) {
-                        hamiltonian.J2_base = tools::parse::extract_paramter_from_path<double>(h5_src.getFilePath(), "b_");
-                        tools::logger::log->debug("Could not find model parameter: {} | Replaced with b=[{:.2f}]", ex.what(), hamiltonian.J2_base);
+                        hamiltonian.J2_xcls = tools::parse::extract_parameter_from_path<double>(h5_src.getFilePath(), "x_");
+                        tools::logger::log->debug("Could not find model parameter: {} | Replaced with b=[{:.2f}]", ex.what(), hamiltonian.J2_xcls);
                     }
                     try {
                         hamiltonian.J2_span = h5_src.readAttribute<size_t>("J2_span", path);
                     } catch(const std::exception &ex) {
-                        hamiltonian.J2_span = tools::parse::extract_paramter_from_path<size_t>(h5_src.getFilePath(), "r_");
+                        hamiltonian.J2_span = tools::parse::extract_parameter_from_path<size_t>(h5_src.getFilePath(), "r_");
                         tools::logger::log->debug("Could not find model parameter: {} | Replaced with r=[{}]", ex.what(), hamiltonian.J2_span);
                     }
                     try {
                         hamiltonian.f_mixer = h5_src.readAttribute<double>("f_mixer", path);
                         hamiltonian.u_layer = h5_src.readAttribute<size_t>("u_layer", path);
                     } catch(const std::exception &ex) {
-                        hamiltonian.f_mixer = tools::parse::extract_paramter_from_path<double>(h5_src.getFilePath(), "f+");
+                        hamiltonian.f_mixer = tools::parse::extract_parameter_from_path<double>(h5_src.getFilePath(), "f+");
                         hamiltonian.u_layer = 6;
                         tools::logger::log->debug("Could not find model parameter: {} | Replaced with f=[{:.2f}] u=[{}]", ex.what(), hamiltonian.f_mixer,
                                                   hamiltonian.u_layer);
@@ -253,7 +263,7 @@ namespace tools::h5io {
                 h5_tgt.writeDataset(modelId.p.J1_wdth, fmt::format("{}/J1_wdth", modelPath));
                 h5_tgt.writeDataset(modelId.p.J2_wdth, fmt::format("{}/J2_wdth", modelPath));
                 h5_tgt.writeDataset(modelId.p.J3_wdth, fmt::format("{}/J3_wdth", modelPath));
-                h5_tgt.writeDataset(modelId.p.J2_base, fmt::format("{}/J2_base", modelPath));
+                h5_tgt.writeDataset(modelId.p.J2_xcls, fmt::format("{}/J2_xcls", modelPath));
                 h5_tgt.writeDataset(modelId.p.J2_span, fmt::format("{}/J2_span", modelPath));
                 h5_tgt.writeDataset(modelId.p.f_mixer, fmt::format("{}/f_mixer", modelPath));
                 h5_tgt.writeDataset(modelId.p.u_layer, fmt::format("{}/u_layer", modelPath));
@@ -406,6 +416,58 @@ namespace tools::h5io {
         }
         return keys;
     }
+    std::vector<ScaleKey> gatherScaleKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid,
+                                          const std::vector<ScaleKey> &srcKeys) {
+        auto                  t_scope = tid::tic_scope(__FUNCTION__);
+        std::vector<ScaleKey> keys;
+        h5pp::Options         options;
+        std::string           srcParentPath = h5pp::fs::path(h5_src.getFilePath()).parent_path();
+        for(auto &srcKey : srcKeys) {
+            // Make sure to only collect keys for objects that we have asked for.
+            if(not pathid.match(srcKey.algo, srcKey.state, srcKey.point)) continue;
+
+            // A "srcKey" is a struct describing a table that we want, with name, type, size, etc
+            // Here we look for a matching table in the given group path, and generate a key for it.
+            // The srcKeys that match an existing table are returned in "keys", with an additional parameter ".key" which
+            // is an unique identifier to find the TableInfo object in the map srcTableDb
+            // The database srcTableDb  is used to keep track the TableInfo structs for found datasets.
+
+            // scaleKeys should be a vector [ "chi_8", "chi_16", "chi_24" ...] with tables for each scaling measurement
+            auto scaleKeys = findKeys(h5_src, pathid.src_path, {srcKey.scale}, -1, 1);
+            for(const auto &scaleKey : scaleKeys) {
+                auto path = fmt::format("{}/{}/{}", pathid.src_path, scaleKey, srcKey.name);
+                auto key  = fmt::format("{}|{}", srcParentPath, path);
+                auto chi  = tools::parse::extract_parameter_from_path<size_t>(path, "chi_");
+                if(srcTableDb.find(key) == srcTableDb.end()) {
+                    srcTableDb[key] = h5_src.getTableInfo(path);
+                    if(srcTableDb[key].tableExists.value()) tools::logger::log->debug("Detected new source scale {}", key);
+                } else {
+                    auto t_read = tid::tic_scope("readTableInfo");
+
+                    auto &srcInfo = srcTableDb[key];
+                    // We reuse the struct srcDsetDb[dsetKey] for every source file,
+                    // but each time have to renew the following fields
+
+                    srcInfo.h5File      = h5_src.openFileHandle();
+                    srcInfo.h5Dset      = std::nullopt;
+                    srcInfo.numRecords  = std::nullopt;
+                    srcInfo.tableExists = std::nullopt;
+                    srcInfo.tablePath   = path;
+                    h5pp::scan::readTableInfo(srcInfo, srcInfo.h5File.value(), options, h5_src.plists);
+                }
+
+                auto &srcInfo = srcTableDb[key];
+                if(srcInfo.tableExists and srcInfo.tableExists.value()) {
+                    keys.emplace_back(srcKey);
+                    keys.back().key = key;
+                    keys.back().chi = chi; // Here we save the chi value to use later for generating a target path
+                } else {
+                    tools::logger::log->debug("Missing scale [{}] in file [{}]", path, h5_src.getFilePath());
+                }
+            }
+        }
+        return keys;
+    }
 
     void transferDatasets(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::DsetInfo>> &tgtDsetDb, const h5pp::File &h5_src,
                           std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const PathId &pathid, const std::vector<DsetKey> &srcDsetKeys,
@@ -419,43 +481,32 @@ namespace tools::h5io {
             auto tgtPath = h5pp::format("{}/{}", pathid.tgt_path, tgtName);
             if(tgtDsetDb.find(tgtPath) == tgtDsetDb.end()) {
                 auto t_create = tid::tic_scope("createDataset");
-                long rows     = 0;
-                long cols     = 0;
-                switch(srcKey.size) {
-                    case Size::FIX: {
-                        if(srcInfo.dsetDims.has_value() and not srcInfo.dsetDims->empty())
-                            rows = static_cast<long>(srcInfo.dsetDims.value()[0]);
-                        else
-                            rows = 1; // It may be a H5S_SCALAR
-                        break;
-                    }
-                    case Size::VAR: {
-                        auto        srcGroupPath    = h5pp::fs::path(srcInfo.dsetPath.value()).parent_path().string();
-                        std::string statusTablePath = fmt::format("{}/status", srcGroupPath);
-                        rows                        = h5_src.readTableField<long>(statusTablePath, "chi_lim_max", h5pp::TableSelection::FIRST);
-                        break;
-                    }
+                auto tgtDims = srcInfo.dsetDims.value();
+                if (tgtDims.empty()) tgtDims = {0}; // In case src is a scalar.
+                while(tgtDims.size() < srcKey.axis + 1) tgtDims.push_back(1);
+                tgtDims[srcKey.axis] = 0;// Create with 0 extent in the new axis direction, so that the dataset starts empty (zero volume)
+
+                // Determine a good chunksize between 10 and 500 elements
+                auto tgtChunk = tgtDims;
+                auto chunkSize = std::clamp(5e5 / static_cast<double>(srcInfo.dsetByte.value()), 10. , 1000. );
+                tgtChunk[srcKey.axis] = static_cast<hsize_t>(chunkSize); // number of elements in the axis that we append into.
+
+                if(srcKey.size == Size::VAR){
+                    auto        srcGroupPath    = h5pp::fs::path(srcInfo.dsetPath.value()).parent_path().string();
+                    std::string statusTablePath = fmt::format("{}/status", srcGroupPath);
+                    long chi_max = h5_src.readTableField<long>(statusTablePath, "chi_lim_max", h5pp::TableSelection::FIRST);
+                    tgtDims[0] = static_cast<hsize_t>(chi_max);
                 }
-                long chunk_rows = std::clamp(rows, 1l, 100l);
-                tools::logger::log->debug("Adding target dset {} | dims ({},{}) | chnk ({},{})", tgtPath, rows, cols, chunk_rows, 10l);
-                tgtDsetDb[tgtPath] = h5_tgt.createDataset(tgtPath, srcInfo.h5Type.value(), H5D_CHUNKED, {rows, cols}, {chunk_rows, 10l});
+
+                tools::logger::log->debug("Adding target dset {} | dims {} | chnk {}", tgtPath, tgtDims, tgtChunk);
+                tgtDsetDb[tgtPath] = h5_tgt.createDataset(tgtPath, srcInfo.h5Type.value(), H5D_CHUNKED, tgtDims, tgtChunk);
             }
             auto &tgtId   = tgtDsetDb[tgtPath];
             auto &tgtInfo = tgtId.info;
             // Determine the target index where to copy this record
             hsize_t index = tgtId.get_index(fileId.seed); // Positive if it has been read already
-            index         = index != std::numeric_limits<hsize_t>::max() ? index : tgtInfo.dsetDims.value().at(1);
-
-            switch(srcKey.type) {
-                case Type::DOUBLE: internal::copy_dset<std::vector<double>>(h5_tgt, h5_src, tgtInfo, srcInfo, index); break;
-                case Type::LONG: internal::copy_dset<std::vector<long>>(h5_tgt, h5_src, tgtInfo, srcInfo, index); break;
-                case Type::INT: internal::copy_dset<std::vector<int>>(h5_tgt, h5_src, tgtInfo, srcInfo, index); break;
-                case Type::COMPLEX: internal::copy_dset<std::vector<std::complex<double>>>(h5_tgt, h5_src, tgtInfo, srcInfo, index); break;
-                case Type::TID: {
-                    internal::copy_dset<std::vector<tid_t>>(h5_tgt, h5_src, tgtInfo, srcInfo, index);
-                    break;
-                }
-            }
+            index         = index != std::numeric_limits<hsize_t>::max() ? index : tgtInfo.dsetDims.value().at(srcKey.axis);
+            internal::copy_dset(h5_tgt, h5_src, tgtInfo, srcInfo, index, srcKey.axis);
 
             // Update the database
             tgtId.insert(fileId.seed, index);
@@ -484,10 +535,10 @@ namespace tools::h5io {
             auto &tgtInfo = tgtId.info;
 
             // Determine the target index where to copy this record
-            hsize_t index = tgtId.get_index(fileId.seed); // Positive if it has been read already
+            hsize_t index = tgtId.get_index(fileId.seed); // Positive if it has been read already, numeric_limits::max if it's new
             index         = index != std::numeric_limits<hsize_t>::max() ? index : tgtInfo.numRecords.value();
 
-            tools::logger::log->trace("Copying table index {} -> {}: {}", srcInfo.numRecords.value(), index, tgtPath);
+            tools::logger::log->trace("Transferring table {} -> {}", srcInfo.numRecords.value(), tgtPath);
             auto t_copy = tid::tic_scope("copyTableRecords");
             h5_tgt.copyTableRecords(srcInfo, tgtInfo, h5pp::TableSelection::LAST, index);
             // Update the database
@@ -507,7 +558,7 @@ namespace tools::h5io {
             if(srcTableDb.find(srcKey.key) == srcTableDb.end()) throw std::logic_error(h5pp::format("Key [{}] was not found in source map", srcKey.key));
             auto &srcInfo    = srcTableDb[srcKey.key];
             auto  srcRecords = srcInfo.numRecords.value();
-            tools::logger::log->trace("Copying crono table {} -> {}", srcRecords, srcInfo.tablePath.value());
+            tools::logger::log->trace("Transferring crono table {} record {}", srcRecords, srcInfo.tablePath.value());
 
             // Iterate over all table elements. These should be a time series measured at every iteration
             // Note that there could in principle exist duplicate entries, which is why we can't trust the
@@ -566,7 +617,7 @@ namespace tools::h5io {
                 index = index != std::numeric_limits<hsize_t>::max() ? index : static_cast<hsize_t>(fileStats.count - 1);
 
                 // read a source record at "iter" into the "index" position in the buffer
-                auto t_buffer = tid::tic_scope("bufferTableRecords");
+                auto t_buffer = tid::tic_scope("bufferCronoRecords");
                 srcReadBuffer.resize(srcInfo.recordBytes.value());
                 h5pp::hdf5::readTableRecords(srcReadBuffer, srcInfo, rec, 1);
                 tgtBuff.insert(srcReadBuffer, index);
@@ -578,6 +629,67 @@ namespace tools::h5io {
                 // Update the database
                 tgtId.insert(fileId.seed, index);
             }
+        }
+    }
+
+    void transferScales(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<BufferedTableInfo>> &tgtTableDb,
+                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid, const std::vector<ScaleKey> &srcScaleKeys,
+                        const FileId &fileId, const FileStats &fileStats) {
+        // In this function we take time series data from each srcTable and create multiple tables tgtTable, one for each
+        // time point (iteration). Each entry in tgtTable corresponds to the same time point on different realizations.
+        auto                   t_scope = tid::tic_scope(__FUNCTION__);
+        std::vector<std::byte> srcReadBuffer;
+        for(const auto &srcKey : srcScaleKeys) {
+            if(srcTableDb.find(srcKey.key) == srcTableDb.end()) throw std::logic_error(h5pp::format("Key [{}] was not found in source map", srcKey.key));
+            auto &srcInfo    = srcTableDb[srcKey.key];
+            auto  srcRecords = srcInfo.numRecords.value();
+            tools::logger::log->trace("Transferring scale table {}", srcInfo.tablePath.value());
+            auto tgtName = h5pp::fs::path(srcInfo.tablePath.value()).filename().string();
+            auto tgtPath = pathid.scale_path(tgtName, srcKey.chi);
+
+            if(tgtTableDb.find(tgtPath) == tgtTableDb.end()) {
+                auto t_create = tid::tic_scope("createTable");
+                tools::logger::log->debug("Adding target scale {}", tgtPath);
+                h5pp::TableInfo tableInfo = h5_tgt.getTableInfo(tgtPath);
+                // Disabling compression is supposed to give a nice speedup. Read here:
+                // https://support.hdfgroup.org/HDF5/doc1.8/Advanced/DirectChunkWrite/UsingDirectChunkWrite.pdf
+                if(not tableInfo.tableExists.value())
+                    tableInfo = h5_tgt.createTable(srcInfo.h5Type.value(), tgtPath, srcInfo.tableTitle.value(), std::nullopt, true);
+
+                tgtTableDb[tgtPath] = tableInfo;
+                //                    tgtTableDb[tgtPath].info.assertWriteReady();
+            }
+            auto &tgtId   = tgtTableDb[tgtPath];
+            auto &tgtBuff = tgtId.buff;
+            //                auto &tgtInfo = tgtTableDb[tgtPath].info;
+
+            // Determine the target index where to copy this record
+            // Under normal circumstances, the "index" counts the number of realizations, or simulation seeds.
+            // tgtInfo.numRecords is the total number of realizations registered until now
+
+            hsize_t index = tgtId.get_index(fileId.seed); // Positive if it has been read already
+            if(index != std::numeric_limits<hsize_t>::max()) {
+                // The table entry for the current realization may already have been added
+                // This happens for instance if we make extra entries in "finished" after adding them to "checkpoint" and/or "savepoint"
+                // However, these entries should be identical, so no need to copy them again.
+#pragma message "Skipping here may not be wise?"
+                tools::logger::log->info("Skip copying existing scale entry: {} | index {}", tgtPath, index);
+                continue;
+            }
+
+            index = index != std::numeric_limits<hsize_t>::max() ? index : static_cast<hsize_t>(fileStats.count - 1);
+            // read a source record at "iter" into the "index" position in the buffer
+            auto t_buffer = tid::tic_scope("bufferScaleRecords");
+            srcReadBuffer.resize(srcInfo.recordBytes.value());
+            h5pp::hdf5::readTableRecords(srcReadBuffer, srcInfo, srcRecords - 1, 1); // Read the last entry
+            tgtBuff.insert(srcReadBuffer, index);
+
+            // copy/append a source record at "iter" into the "index" position on the table.
+            //                tools::logger::log->trace("Copying scale index {} -> {}: {}", rec, index, tgtPath);
+            //                auto t_copy = tid::tic_scope("copyTableRecords");
+            //                h5_tgt.copyTableRecords(srcInfo, rec, 1, tgtInfo, static_cast<hsize_t>(index));
+            // Update the database
+            tgtId.insert(fileId.seed, index);
         }
     }
 
@@ -615,23 +727,25 @@ namespace tools::h5io {
                     try {
                         auto t_dset   = tid::tic_scope("dset");
                         auto dsetKeys = tools::h5io::gatherDsetKeys(h5_src, srcdb.dset, pathid, keys.dsets);
-                        //                        tools::logger::log->info("Gathered dset keys");
                         tools::h5io::transferDatasets(h5_tgt, tgtdb.dset, h5_src, srcdb.dset, pathid, dsetKeys, fileId);
                     } catch(const std::runtime_error &ex) { tools::logger::log->warn("Dset transfer failed in [{}]: {}", pathid.src_path, ex.what()); }
 
                     try {
                         auto t_table   = tid::tic_scope("table");
                         auto tableKeys = tools::h5io::gatherTableKeys(h5_src, srcdb.table, pathid, keys.tables);
-                        //                        tools::logger::log->info("Gathered table keys {}", tableKeys);
                         tools::h5io::transferTables(h5_tgt, tgtdb.table, srcdb.table, pathid, tableKeys, fileId);
                     } catch(const std::runtime_error &ex) { tools::logger::log->error("Table transfer failed in [{}]: {}", pathid.src_path, ex.what()); }
 
                     try {
                         auto t_crono   = tid::tic_scope("crono");
                         auto cronoKeys = tools::h5io::gatherCronoKeys(h5_src, srcdb.crono, pathid, keys.cronos);
-                        //                        tools::logger::log->info("Gathered crono keys {}", cronoKeys);
                         tools::h5io::transferCronos(h5_tgt, tgtdb.crono, srcdb.crono, pathid, cronoKeys, fileId, fileStats);
                     } catch(const std::runtime_error &ex) { tools::logger::log->error("Crono transfer failed in[{}]: {}", pathid.src_path, ex.what()); }
+                    try {
+                        auto t_scale   = tid::tic_scope("scale");
+                        auto scaleKeys = tools::h5io::gatherScaleKeys(h5_src, srcdb.scale, pathid, keys.scales);
+                        tools::h5io::transferScales(h5_tgt, tgtdb.scale, srcdb.scale, pathid, scaleKeys, fileId, fileStats);
+                    } catch(const std::runtime_error &ex) { tools::logger::log->error("Scale transfer failed in[{}]: {}", pathid.src_path, ex.what()); }
                 }
             }
         }
@@ -653,12 +767,11 @@ namespace tools::h5io {
     void writeProfiling(h5pp::File &h5_tgt) {
         auto t_scope = tid::tic_scope(__FUNCTION__);
         H5T_profiling::register_table_type();
-        for(const auto &t : tid::get_tree())
-            if(t->get_level() <= tid::level::normal) {
-                auto tablepath = h5pp::format(".db/prof_{}/{}", mpi::world.id, t->get_label());
-                if(not h5_tgt.linkExists(tablepath)) h5_tgt.createTable(H5T_profiling::h5_type, tablepath, "H5MBL Profiling", {100});
-                H5T_profiling::item entry{t->get_time(), t->get_time_avg(), t->get_tic_count()};
-                h5_tgt.writeTableRecords(entry, tablepath, 0);
-            }
+        for(const auto &t : tid::get_tree("", tid::level::normal)) {
+            auto tablepath = h5pp::format(".db/prof_{}/{}", mpi::world.id, t->get_label());
+            if(not h5_tgt.linkExists(tablepath)) h5_tgt.createTable(H5T_profiling::h5_type, tablepath, "H5MBL Profiling", {100});
+            H5T_profiling::item entry{t->get_time(), t->get_time_avg(), t->get_tic_count()};
+            h5_tgt.writeTableRecords(entry, tablepath, 0);
+        }
     }
 }

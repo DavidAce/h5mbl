@@ -22,9 +22,9 @@ struct Key {
 
 struct DsetKey : public Key {
     Size size = Size::FIX;
-    Type type;
-    DsetKey(std::string_view algo_, std::string_view state_, std::string_view point_, std::string_view name_, Size size_, Type type_)
-        : Key(algo_, state_, point_, name_), size(size_), type(type_) {}
+    size_t axis;
+    DsetKey(std::string_view algo_, std::string_view state_, std::string_view point_, std::string_view name_, Size size_, size_t axis_)
+        : Key(algo_, state_, point_, name_), size(size_), axis(axis_) {}
 };
 
 struct TableKey : public Key {
@@ -33,6 +33,13 @@ struct TableKey : public Key {
 
 struct CronoKey : public Key {
     using Key::Key;
+};
+
+struct ScaleKey : public Key {
+    std::string scale; // The group pattern, usually something like "chi_*"
+    size_t chi; // The actual value of chi found
+    ScaleKey(std::string_view algo_, std::string_view state_, std::string_view point_, std::string_view scale_, std::string_view name_)
+        : Key(algo_, state_, point_, name_), scale(scale_), chi(-1ul){}
 };
 
 struct ModelKey {

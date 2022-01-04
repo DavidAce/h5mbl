@@ -40,6 +40,8 @@ namespace tools::h5io {
                                           const std::vector<TableKey> &tables);
     std::vector<CronoKey> gatherCronoKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid,
                                           const std::vector<CronoKey> &cronos);
+    std::vector<ScaleKey> gatherCronoKeys(const h5pp::File &h5_src, std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid,
+                                          const std::vector<ScaleKey> &cronos);
 
     void transferDatasets(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::DsetInfo>> &tgtDsetDb, const h5pp::File &h5_src,
                           std::unordered_map<std::string, h5pp::DsetInfo> &srcDsetDb, const PathId &pathid, const std::vector<DsetKey> &srcDsetKeys,
@@ -51,6 +53,9 @@ namespace tools::h5io {
 
     void transferCronos(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
                         std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid, const std::vector<std::string> &srcCronoKeys,
+                        const FileId &fileId, const FileStats &stats);
+    void transferScales(h5pp::File &h5_tgt, std::unordered_map<std::string, InfoId<h5pp::TableInfo>> &tgtTableDb,
+                        std::unordered_map<std::string, h5pp::TableInfo> &srcTableDb, const PathId &pathid, const std::vector<std::string> &srcScaleKeys,
                         const FileId &fileId, const FileStats &stats);
 
     template<typename ModelType>

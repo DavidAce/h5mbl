@@ -17,6 +17,7 @@ namespace tools::h5db {
         std::vector<DsetKey>  dsets;
         std::vector<TableKey> tables;
         std::vector<CronoKey> cronos;
+        std::vector<ScaleKey> scales;
         std::vector<ModelKey> models;
 
         [[nodiscard]] std::vector<std::string> get_algos() const {
@@ -24,6 +25,7 @@ namespace tools::h5db {
             for(auto &d : dsets) v.emplace_back(d.algo);
             for(auto &d : tables) v.emplace_back(d.algo);
             for(auto &d : cronos) v.emplace_back(d.algo);
+            for(auto &d : scales) v.emplace_back(d.algo);
             for(auto &d : models) v.emplace_back(d.algo);
             std::sort(v.begin(), v.end());
             v.erase(std::unique(v.begin(), v.end()), v.end());
@@ -34,6 +36,7 @@ namespace tools::h5db {
             for(auto &d : dsets) v.emplace_back(d.state);
             for(auto &d : tables) v.emplace_back(d.state);
             for(auto &d : cronos) v.emplace_back(d.state);
+            for(auto &d : scales) v.emplace_back(d.state);
             std::sort(v.begin(), v.end());
             v.erase(std::unique(v.begin(), v.end()), v.end());
             return v;
@@ -43,6 +46,7 @@ namespace tools::h5db {
             for(auto &d : dsets) v.emplace_back(d.point);
             for(auto &d : tables) v.emplace_back(d.point);
             for(auto &d : cronos) v.emplace_back(d.point);
+            for(auto &d : scales) v.emplace_back(d.point);
             std::sort(v.begin(), v.end());
             v.erase(std::unique(v.begin(), v.end()), v.end());
             return v;
@@ -55,11 +59,13 @@ namespace tools::h5db {
         std::unordered_map<std::string, h5pp::DsetInfo>  dset;
         std::unordered_map<std::string, h5pp::TableInfo> table;
         std::unordered_map<std::string, h5pp::TableInfo> crono;
+        std::unordered_map<std::string, h5pp::TableInfo> scale;
         std::unordered_map<std::string, ModelType>       model;
         void                                             clear() {
             dset.clear();
             table.clear();
             crono.clear();
+            scale.clear();
             model.clear();
         }
     };
@@ -69,12 +75,14 @@ namespace tools::h5db {
         std::unordered_map<std::string, InfoId<h5pp::DsetInfo>>    dset;
         std::unordered_map<std::string, InfoId<h5pp::TableInfo>>   table;
         std::unordered_map<std::string, InfoId<BufferedTableInfo>> crono;
+        std::unordered_map<std::string, InfoId<BufferedTableInfo>> scale;
         std::unordered_map<std::string, InfoId<h5pp::TableInfo>>   model;
         void                                                       clear() {
             file.clear();
             dset.clear();
             table.clear();
             crono.clear();
+            scale.clear();
             model.clear();
         }
     };

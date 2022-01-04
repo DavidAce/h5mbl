@@ -105,6 +105,17 @@ bool PathId::match(std::string_view algo_pattern, std::string_view state_pattern
      */
     return h5pp::format("{}/{}/{}/cronos/iter_{}/{}", base, algo, state, iter, tablename);
 }
+[[nodiscard]] std::string PathId::scale_path(std::string_view tablename, size_t chi) const {
+    /*
+     * When collecting a "scale" kind of table:
+     *      - the source path is <base>/<algo>/<state>/fes/chi_#/<tablename>
+     *      - we want the last entry in each <tablename>
+     *      - we collect the contribution from each realization to each chi_# separately
+     *      - the target path <base>/<algo>/<state>/fes/chi_<#>/<tablename>, collects all the contributions
+     */
+    return h5pp::format("{}/{}/{}/fes/chi_{}/{}", base, algo, state, chi, tablename);
+}
+
 
 H5T_FileId::H5T_FileId() { register_table_type(); }
 void H5T_FileId::register_table_type() {
